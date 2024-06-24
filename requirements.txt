@@ -2,3 +2,6 @@ torch
 python-dateutil
 click
 tqdm
+gitpython
+lxml
+doxmlparser

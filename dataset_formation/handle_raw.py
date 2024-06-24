@@ -5,6 +5,9 @@ from collections import defaultdict
 import os
 import click
 from tqdm import tqdm
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 WORKING_PERIOD = 2.5  # 2 hours
 # 定义tzinfos来处理未知时区
@@ -67,6 +70,11 @@ def save_grouped_events(grouped_events, root, output_file):
         group_tree.write(filename, encoding='unicode', xml_declaration=True)
 
 def handle_raw_xml(file_path:str, output_dir:str):
+    # 获取对应的repo
+    repos = get_repos_from_xml(file_path)
+    if len(repos) == 0:
+        logging.warning("No Mylyn repo found in the xml file")
+        return set()
     # 读取和解析XML文件
     tree = ET.parse(file_path)
     root = tree.getroot()
@@ -76,12 +84,13 @@ def handle_raw_xml(file_path:str, output_dir:str):
     sorted_elements = sorted(selection_edit_elements, key=parse_start_date)
 
     if len(sorted_elements) == 0:
-        return
+        return set()
     # 按2小时间隔分组
     grouped_events = group_events_by_interval(sorted_elements)
     # 保存分组后的事件
     output_file = file_path.split('/')[-2]
     save_grouped_events(grouped_events, root, f"{output_dir}/{output_file}") # data/working_periods/195691_83176_zip
+    return repos
 
 def get_repos_from_xml(xml_file):
     tree = ET.parse(xml_file)
@@ -116,8 +125,7 @@ def main(input_path):
         os.makedirs('data/working_periods')
 
     for xml_file in tqdm(xml_files):
-        # handle_raw_xml(xml_file, 'data/working_periods')
-        repos_from_xml = get_repos_from_xml(xml_file)
+        repos_from_xml = handle_raw_xml(xml_file, 'data/working_periods')
         repos.update(repos_from_xml)
     
     with open('data/mylyn-repos.txt', 'w') as f:
