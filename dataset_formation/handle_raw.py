@@ -83,12 +83,29 @@ def handle_raw_xml(file_path:str, output_dir:str):
     output_file = file_path.split('/')[-2]
     save_grouped_events(grouped_events, root, f"{output_dir}/{output_file}") # data/working_periods/195691_83176_zip
 
+def get_repos_from_xml(xml_file):
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    repos = set()
+    # 提取所有 StructureHandle 元素的值
+    java_elements = root.findall(".//InteractionEvent[@StructureKind='java']") 
+    structure_handles = [event.get('StructureHandle') for event in java_elements]
+    for handle in structure_handles:
+        # 不考虑空值或者包含mylar的值（FIXME： 不确定其他repo要不要考虑,mylar/xmlrpc）
+        if len(handle) == 0 or 'mylyn' not in handle:
+            continue
+        if handle[0] == '/':
+            handle = handle[1:]
+        repo = handle.split('/')[0][1:]
+        repos.add(repo)
+    return repos
 
 @click.command()
 @click.argument('input_path', type=click.Path(exists=True))
 def main(input_path):
     dirs = os.listdir(input_path)
     xml_files = []
+    repos = set()
     for directory in dirs:
         for root, dirs, files in os.walk(f"{input_path}/{directory}"):
             for file in files:
@@ -99,7 +116,14 @@ def main(input_path):
         os.makedirs('data/working_periods')
 
     for xml_file in tqdm(xml_files):
-        handle_raw_xml(xml_file, 'data/working_periods')
+        # handle_raw_xml(xml_file, 'data/working_periods')
+        repos_from_xml = get_repos_from_xml(xml_file)
+        repos.update(repos_from_xml)
+    
+    with open('data/mylyn-repos.txt', 'w') as f:
+        for repo in repos:
+            f.write(f"{repo}\n")
+   
 
 
 if __name__ == '__main__':
