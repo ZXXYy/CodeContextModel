@@ -7,7 +7,7 @@ from tqdm import tqdm
 import click
 import os
 
-logging.basicConfig(level=logging.DEBUG, format='[%(filename)s:%(lineno)d] - %(message)s')
+logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('SEED')
 
 
@@ -147,11 +147,6 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, steps=1):
     
     # write new graph to file
     prefix_output = os.path.join(os.path.dirname(expanded_model_path), "seed_expanded")
-    if not os.path.exists(prefix_output):
-        os.makedirs(prefix_output)
-    # dir not empty, remove all files
-    for file in os.listdir(prefix_output):
-        os.remove(os.path.join(prefix_output, file))
     logger.debug(f"new_nodes: {len(new_nodes)}, new_edges: {len(new_edges)}")
     new_tree = form_expand_graph(new_nodes, new_edges, root)
     new_tree.write(f"{prefix_output}/{steps}_step_seeds_{idx}_expanded_model.xml", encoding='utf-8', xml_declaration=True)
@@ -162,17 +157,20 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, steps=1):
 def main(input_path, step):
     context_models = os.listdir(input_path)
     for context_model in tqdm(context_models):
-        if context_model != '42':
-            continue
         logger.debug(f"Processing {context_model}")
         seeds, filtered_vertex_ids = generate_seed(f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml", step)
         if seeds is None:
             continue
+        expanded_model_path = f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml"
+        prefix_output = os.path.join(os.path.dirname(expanded_model_path), "seed_expanded")
+        if not os.path.exists(prefix_output):
+            os.makedirs(prefix_output)
+        # dir not empty, remove all files
+        for file in os.listdir(prefix_output):
+            os.remove(os.path.join(prefix_output, file))
         for i, seed in enumerate(seeds):
             logger.debug(f"Seed: {seed}")
-            generate_expanded_graph_from_seed(f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml", seed, idx=i, steps=step)
-            break
-            # display_graph(f"tmp/1_step_seeds_{i}_expanded_model.xml")
+            generate_expanded_graph_from_seed(expanded_model_path, seed, idx=i, steps=step)
 
 if __name__ == '__main__':
     main()
@@ -186,4 +184,5 @@ if __name__ == '__main__':
     #         subgraph2graph(f"{input_path}/{context_model}/new_{step}_step_expanded_model.xml")
 
     # 使用下述代码展示图     
-    # display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/42/seed_expanded/2_step_seeds_0_expanded_model.xml')
+    # display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/1729/seed_expanded/1_step_seeds_0_expanded_model.xml')
+    # display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/1729/big_1_step_expanded_model.xml')
