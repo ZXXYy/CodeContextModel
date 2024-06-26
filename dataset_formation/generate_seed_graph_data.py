@@ -22,7 +22,7 @@ def display_graph(graph_path):
         label = edge.get('label')
         dot.edge(edge.get('start'), edge.get('end'), label=label, color='black')
     # 保存并展示图
-    dot.render(graph_path.split('.')[0], format='png', view=True)
+    dot.render("tmp/"+graph_path.split('.')[0], format='png', view=True)
 
 def generate_seed(cxt_model_path, step=1):
     tree = ET.parse(cxt_model_path)
@@ -100,7 +100,7 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, step=1):
     for edge in new_edges:
         edges.append(edge)
     new_tree = ET.ElementTree(new_root)
-    new_tree.write(f"{step}_step_seeds_{idx}_expanded_model.xml", encoding='utf-8', xml_declaration=True)
+    new_tree.write(f"tmp/{step}_step_seeds_{idx}_expanded_model.xml", encoding='utf-8', xml_declaration=True)
 
 
 seeds, filtered_vertex_ids = generate_seed("/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/repo_first_3/60/code_context_model.xml")

@@ -1,2 +1,4 @@
 mylyn_zip/
 data/
+*.png
+tmp/
