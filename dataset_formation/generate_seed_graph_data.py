@@ -3,8 +3,11 @@ import xml.etree.ElementTree as ET
 import itertools
 from graphviz import Digraph
 import logging
+from tqdm import tqdm
+import click
+import os
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('SEED')
 
 
@@ -12,11 +15,16 @@ def display_graph(graph_path):
     tree = ET.parse(graph_path)
     root = tree.getroot()
     dot = Digraph()
+    seed_expanded = False
+    vertices = root.findall(".//vertex")
+    if 'seed' in vertices[0].attrib:
+        seed_expanded = True
     # 渲染结点
     for vertex in root.findall(".//vertex"):
         positive_node = vertex.get('origin') == '1'
         color = 'red' if positive_node else 'lightgrey'
-        dot.node(vertex.get('id'), color=color)
+        shape = 'diamond' if seed_expanded and vertex.get('seed') == '1' else 'ellipse' 
+        dot.node(vertex.get('id'), color=color, shape=shape)
     # 渲染边
     for edge in root.findall(".//edge"):
         label = edge.get('label')
@@ -24,11 +32,38 @@ def display_graph(graph_path):
     # 保存并展示图
     dot.render(graph_path.split('.')[0], format='png', view=True)
 
-def generate_seed(cxt_model_path, step=1):
-    tree = ET.parse(cxt_model_path)
+def subgraph2graph(expanded_model_path):
+    tree = ET.parse(expanded_model_path)
     root = tree.getroot()
+    graphs = root.findall(".//graph")
+    total_vertices = 0
+    for graph in graphs:
+        vertices = graph.findall(".//vertex")
+        for vertex in vertices:
+            id = int(vertex.get('id'))
+            vertex.set('id', str(id + total_vertices))
+        for edge in graph.findall(".//edge"):
+            start = int(edge.get('start'))
+            end = int(edge.get('end'))
+            edge.set('start', str(start + total_vertices))
+            edge.set('end', str(end + total_vertices))
+        total_vertices += len(vertices)
+    # write to file
+    out_path = expanded_model_path.replace('new_', 'big_')
+    tree.write(out_path, encoding='utf-8', xml_declaration=False)
+
+def generate_seed(expanded_model_path, step=1):
+    tree = ET.parse(expanded_model_path)
+    root = tree.getroot()
+    vertex_ids = []
     # get vertex id
-    vertex_ids = [vertex.get('id') for vertex in root.findall(".//vertex")]
+    for vertex in root.findall(".//vertex"):
+        if vertex.get('origin') == '1':
+            vertex_ids.append(vertex.get('id'))
+    
+    if len(vertex_ids)-step < 1:
+        logger.error(f"{expanded_model_path}: The number of seeds is less than 1")
+        return None, None
     # select len(vertex_ids) - step vertex as seed
     seeds = list(itertools.combinations(vertex_ids, len(vertex_ids)-step))
     # get filtered vertex ids
@@ -72,6 +107,7 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, steps=1):
     for seed in seeds:
         vertex = root.find(f".//vertex[@id='{seed}']")
         if vertex not in new_nodes:
+            vertex.set('seed', '1')
             new_nodes.append(vertex)
             logger.debug(vertex.get('id'))
 
@@ -95,6 +131,7 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, steps=1):
                 vertex = root.find(f".//vertex[@id='{vertex_id}']")
                 if vertex not in nodes:
                     logger.debug(f"vertex: {vertex.get('id')}")
+                    vertex.set('seed', '0')
                     nodes.append(vertex)
             logger.debug(f"===========")
         # 基于新的nodes继续扩展
@@ -109,12 +146,44 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, steps=1):
             new_edges.append(edge)
     
     # write new graph to file
+    prefix_output = os.path.join(os.path.dirname(expanded_model_path), "seed_expanded")
+    if not os.path.exists(prefix_output):
+        os.makedirs(prefix_output)
+    # dir not empty, remove all files
+    for file in os.listdir(prefix_output):
+        os.remove(os.path.join(prefix_output, file))
     logger.debug(f"new_nodes: {len(new_nodes)}, new_edges: {len(new_edges)}")
     new_tree = form_expand_graph(new_nodes, new_edges, root)
-    new_tree.write(f"tmp/{steps}_step_seeds_{idx}_expanded_model.xml", encoding='utf-8', xml_declaration=True)
+    new_tree.write(f"{prefix_output}/{steps}_step_seeds_{idx}_expanded_model.xml", encoding='utf-8', xml_declaration=True)
 
+@click.command()
+@click.argument('input_path', type=click.Path(exists=True))
+@click.option('--step', default=1, help='The number of steps to expand the seed graph')
+def main(input_path, step):
+    context_models = os.listdir(input_path)
+    for context_model in tqdm(context_models):
+        if context_model != '42':
+            continue
+        logger.debug(f"Processing {context_model}")
+        seeds, filtered_vertex_ids = generate_seed(f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml", step)
+        if seeds is None:
+            continue
+        for i, seed in enumerate(seeds):
+            logger.debug(f"Seed: {seed}")
+            generate_expanded_graph_from_seed(f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml", seed, idx=i, steps=step)
+            break
+            # display_graph(f"tmp/1_step_seeds_{i}_expanded_model.xml")
 
-seeds, filtered_vertex_ids = generate_seed("/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/repo_first_3/60/code_context_model.xml")
-generate_expanded_graph_from_seed("/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/repo_first_3/60/new_1_step_expanded_model.xml", seeds[0], 1, steps=1)
-display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/repo_first_3/60/new_1_step_expanded_model.xml')
-display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/tmp/1_step_seeds_1_expanded_model.xml')
+if __name__ == '__main__':
+    main()
+
+    # 使用下述代码转化子图为一张完整的图
+    # input_path = '/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn'
+    # context_models = os.listdir(input_path)
+    # for context_model in tqdm(context_models):
+    #     logger.debug(f"Processing {context_model}")
+    #     for step in range(1, 4):
+    #         subgraph2graph(f"{input_path}/{context_model}/new_{step}_step_expanded_model.xml")
+
+    # 使用下述代码展示图     
+    # display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/42/seed_expanded/2_step_seeds_0_expanded_model.xml')
