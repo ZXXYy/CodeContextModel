@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 from tqdm import tqdm
+import click
 
 def get_nodes_text(expand_graph_path: str) -> pd.DataFrame:
     tree = ET.parse(expand_graph_path)
@@ -97,13 +98,17 @@ def embedding_inference(input_dir):
         df_code = df_code.drop(columns=['code']) 
         df_code.to_pickle(os.path.join(input_dir, id_dir, f'{model}_embedding.pkl'))
         break
-            
+
+@click.command()
+@click.option('--input_dir', type=str, help='input directory')
+def main(input_dir):
+    embedding_inference(input_dir)
 
 
 if __name__ == '__main__':
     # nodes_text = get_nodes_text("data/mylyn/60/seed_expanded/1_step_seeds_0_expanded_model.xml")
     # model = BgeEmbedding()
     # model.get_embedding(nodes_text)
-    input_dir = "data/mylyn/"
-    embedding_inference(input_dir)
+    main()
+    
     
