@@ -7,3 +7,5 @@ lxml
 doxmlparser
 graphviz
 transformers
+matplotlib
+numpy
