@@ -120,4 +120,3 @@ if __name__ == '__main__':
     # model.get_embedding(nodes_text)
     main()
     
-    
