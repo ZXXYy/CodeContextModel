@@ -1,13 +1,21 @@
-import torch
-from transformers import AutoModel, AutoTokenizer
-import xml.etree.ElementTree as ET
+
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '8'
+import random
+import click
+import logging
+
+import torch
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import random
+import xml.etree.ElementTree as ET
+
 from tqdm import tqdm
-import click
+from transformers import AutoModel, AutoTokenizer
+
+logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
+logger = logging.getLogger('Eembedding')
 
 def get_nodes_text(expand_graph_path: str) -> pd.DataFrame:
     tree = ET.parse(expand_graph_path)
@@ -21,7 +29,7 @@ def get_nodes_text(expand_graph_path: str) -> pd.DataFrame:
     for vertex in nodes:
         node_id = '_'.join([model_dir, vertex.get('kind'), vertex.get('ref_id')]) 
         # node_text = df_code[df_code['id'] == node_id]['code'].values[0]
-        # print(len(node_text))
+        # logger.info(len(node_text))
         nodes_id.append(node_id)
     return df_code[df_code['id'].isin(nodes_id)]
 
@@ -47,9 +55,10 @@ class BgeEmbedding(TextEmbedding):
             outputs = self.model(**batch_dict)
             embeddings = outputs[0][:, 0] # FIXME: bge只需要取第一个token的embedding，不同的模型不一样
         embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-        print(embeddings.shape)
-        print("Sentence embeddings:", embeddings)
-        return embeddings
+        logger.info(embeddings.device)
+        logger.info(embeddings.shape)
+        logger.info("Sentence embeddings:", embeddings)
+        return embeddings.to('cpu')
 
 def get_tokenizer_data(input_texts):
     model = BgeEmbedding()
@@ -69,14 +78,14 @@ def get_tokenizer_statistics(input_dir):
             continue
         file = os.listdir(seed_dir)[random.randint(0, len(os.listdir(seed_dir)) - 1)]
         if file.endswith(".xml"):
-            print(f"processing {seed_dir + file}")
+            logger.info(f"processing {seed_dir + file}")
             nodes_text = get_nodes_text(seed_dir + file)['code'].tolist()
             token_counts = get_tokenizer_data(nodes_text)
             total_token_counts.extend( [x for x in token_counts if x <= 2000])
         cnt += 1
         if cnt == 1000:
             break
-    print(total_token_counts)
+    logger.info(total_token_counts)
     bins = 50  # 可以根据需要调整 bin 的数量
     hist, bin_edges = np.histogram(total_token_counts, bins=bins)
     plt.figure(figsize=(12, 6))
@@ -88,9 +97,9 @@ def embedding_inference(input_dir):
     model = BgeEmbedding()
     id_dirs = sorted(os.listdir(input_dir))
     for id_dir in id_dirs:
-        print(input_dir, id_dir)
+        logger.info(input_dir, id_dir)
         codes_path = os.path.join(input_dir, id_dir, "my_java_codes.tsv")
-        print(f"processing {codes_path}")
+        logger.info(f"processing {codes_path}")
         df_code = pd.read_csv(codes_path, sep='\t')
         nodes_text = df_code['code'].tolist()
         embeddings = model.get_embedding(nodes_text)
