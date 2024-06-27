@@ -57,7 +57,7 @@ class BgeEmbedding(TextEmbedding):
         embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
         logger.info(embeddings.device)
         logger.info(embeddings.shape)
-        logger.info("Sentence embeddings:", embeddings)
+        logger.info(f"Sentence embeddings:{embeddings}" )
         return embeddings.to('cpu')
 
 def get_tokenizer_data(input_texts):
@@ -97,7 +97,7 @@ def embedding_inference(input_dir):
     model = BgeEmbedding()
     id_dirs = sorted(os.listdir(input_dir))
     for id_dir in id_dirs:
-        logger.info(input_dir, id_dir)
+        logger.info(f"{input_dir}, {id_dir}")
         codes_path = os.path.join(input_dir, id_dir, "my_java_codes.tsv")
         logger.info(f"processing {codes_path}")
         df_code = pd.read_csv(codes_path, sep='\t')
