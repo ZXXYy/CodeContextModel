@@ -17,22 +17,6 @@ from transformers import AutoModel, AutoTokenizer
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('Eembedding')
 
-def get_nodes_text(expand_graph_path: str) -> pd.DataFrame:
-    tree = ET.parse(expand_graph_path)
-    root = tree.getroot()
-    nodes = root.findall(".//vertex")
-    nodes_id = []
-    model_dir = expand_graph_path.split('/')[-3]
-    codes_path = os.path.dirname(os.path.dirname(expand_graph_path)) + "/my_java_codes.tsv"
-    # read tsv file
-    df_code = pd.read_csv(codes_path, sep='\t')
-    for vertex in nodes:
-        node_id = '_'.join([model_dir, vertex.get('kind'), vertex.get('ref_id')]) 
-        # node_text = df_code[df_code['id'] == node_id]['code'].values[0]
-        # logger.info(len(node_text))
-        nodes_id.append(node_id)
-    return df_code[df_code['id'].isin(nodes_id)]
-
 class TextEmbedding():
     def __init__(self):
         self.tokenizer = None
@@ -82,6 +66,23 @@ class BgeEmbedding(TextEmbedding):
         logger.info(f"Sentence embeddings: {all_embeddings}")
         
         return all_embeddings.tolist()
+
+
+def get_nodes_text(expand_graph_path: str) -> pd.DataFrame:
+    tree = ET.parse(expand_graph_path)
+    root = tree.getroot()
+    nodes = root.findall(".//vertex")
+    nodes_id = []
+    model_dir = expand_graph_path.split('/')[-3]
+    codes_path = os.path.dirname(os.path.dirname(expand_graph_path)) + "/my_java_codes.tsv"
+    # read tsv file
+    df_code = pd.read_csv(codes_path, sep='\t')
+    for vertex in nodes:
+        node_id = '_'.join([model_dir, vertex.get('kind'), vertex.get('ref_id')]) 
+        # node_text = df_code[df_code['id'] == node_id]['code'].values[0]
+        # logger.info(len(node_text))
+        nodes_id.append(node_id)
+    return df_code[df_code['id'].isin(nodes_id)]
 
 def get_tokenizer_data(input_texts):
     model = BgeEmbedding()
