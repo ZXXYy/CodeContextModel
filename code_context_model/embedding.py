@@ -45,6 +45,7 @@ class BgeEmbedding(TextEmbedding):
     def __init__(self):
         self.tokenizer = AutoTokenizer.from_pretrained('BAAI/bge-large-en-v1.5')
         self.model = AutoModel.from_pretrained('BAAI/bge-large-en-v1.5', revision="refs/pr/13")
+        logger.info("BgeEmbedding initialized")
     
     def __str__(self):
         return "BgeEmbedding"
