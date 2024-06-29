@@ -135,13 +135,15 @@ def read_xml_dataset(data_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # train args
+    parser.add_argument('--do_train', action='store_true', help='train the model')
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
     parser.add_argument('--num_epochs', type=int, default=50, help='number of epochs')
     parser.add_argument('--threshold', type=float, default=0.5, help='threshold for binary classification')
     parser.add_argument('--output_dir', type=str, default='output', help='output directory')
     parser.add_argument('--seed', type=int, default=42, help='random seed')
-    parser.add_argument('--do_train', action='store_true', help='train the model')
+    # test args
     parser.add_argument('--do_test', action='store_true', help='test the model')
     parser.add_argument('--test_model_pth', type=str, default='model.pth', help='test model path')
     args = parser.parse_args()
@@ -186,3 +188,4 @@ if __name__ == "__main__":
         )
     
 
+    # python train.py --input_dir "" --do_train --do_test --output_dir "" --num_epochs 50 --lr 1e-4 --threshold 0.5 --seed 42
