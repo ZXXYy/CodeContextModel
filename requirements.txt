@@ -8,3 +8,4 @@ graphviz
 transformers
 matplotlib
 numpy
+dgl
