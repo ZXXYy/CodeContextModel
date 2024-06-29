@@ -30,3 +30,4 @@ class RGCN(nn.Module):
         h = self.fc(h)
         return F.softmax(h, dim=1)
     
+

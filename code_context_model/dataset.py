@@ -14,11 +14,13 @@ from torch.utils.data import DataLoader, Subset
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('dataset')
 
+# one-hot encoding for edge labels
 edge_label = {
-    "declares": 0,
-    "calls": 1,
-    "inherits": 2,
-    "implements": 3,
+    "declares": [0,0,0,1],
+    "calls": [0,0,1,0],
+    "inherits": [0,1,0,0],
+    "implements": [1,0,0,0],
+
 }
 
 class ExpandGraphDataset(DGLDataset):
@@ -50,7 +52,7 @@ class ExpandGraphDataset(DGLDataset):
                 node_id = '_'.join([model_dir, vertex.get('kind'), vertex.get('ref_id')]) 
                 node_embedding = list(df_embeddings[df_embeddings['id'] == node_id]['embedding'])
                 vertex_features.append(node_embedding)
-                vertex_labels.append(bool(vertex.get('origin')) and not bool(vertex.get('seed')))
+                vertex_labels.append(vertex.get('origin', '0') == '1' and vertex.get('seed', '0') == '0')
 
             # print(vertex_features)
             logger.info(f"features len: {len(vertex_features)}")
@@ -66,8 +68,11 @@ class ExpandGraphDataset(DGLDataset):
                 start = int(edge.get('start'))
                 end = int(edge.get('end'))
                 label = edge.get('label')
+                # 添加无向边
                 edge_list.append((id_map[start], id_map[end]))
-                edge_labels.append(edge_label[label])
+                edge_list.append((id_map[end], id_map[start]))
+                edge_labels.append([0] + edge_label[label] )
+                edge_labels.append([1] + edge_label[label] ) # 反向边
 
             # 将边特征转换为张量
             edge_features = torch.tensor(edge_labels).unsqueeze(1)  # 转换为2D张量
