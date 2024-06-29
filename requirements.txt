@@ -9,3 +9,4 @@ transformers
 matplotlib
 numpy
 dgl
+scikit-learn 

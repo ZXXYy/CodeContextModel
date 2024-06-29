@@ -2,11 +2,14 @@ import dgl
 import torch
 import os
 import random
-import pandas as pd
 import logging
+import pandas as pd
+import numpy as np
 
 from dgl.data import DGLDataset
 import xml.etree.ElementTree as ET
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, Subset
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('dataset')
@@ -88,10 +91,41 @@ class ExpandGraphDataset(DGLDataset):
     def __len__(self):
         return len(self.graphs)
     
+def split_dataset(dataset, train_ratio=0.8, valid_ratio=0.1):
+    # 生成数据集索引
+    indices = np.arange(len(dataset))
+    # 划分训练集和测试集
+    train_indices, test_indices = train_test_split(indices, test_size=0.2, train_size=0.8, random_state=42)
+
+    # 划分训练集和验证集
+    train_indices, valid_indices = train_test_split(train_indices, test_size=0.2, train_size=0.8, random_state=42)
+
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    valid_dataset = torch.utils.data.Subset(dataset, valid_indices)
+    test_dataset = torch.utils.data.Subset(dataset, test_indices)
+
+    return train_dataset, valid_dataset, test_dataset
+
 
 if __name__ == '__main__':
     xml_dir = 'data/mylyn/60/seed_expanded'
-    # xml_files = [os.path.join(xml_dir, f) for f in os.listdir(xml_dir) if f.endswith('.xml')]
-    xml_files = ['data/mylyn/60/seed_expanded/1_step_seeds_3_expanded_model.xml']
+    xml_files = [os.path.join(xml_dir, f) for f in os.listdir(xml_dir) if f.endswith('.xml')]
+    # xml_files = ['data/mylyn/60/seed_expanded/1_step_seeds_3_expanded_model.xml']
     print(xml_files)
     data_builder = ExpandGraphDataset(xml_files)
+    # 切分数据集
+    train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
+    # 使用 DataLoader 加载子集
+    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
+    valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
+
+    logger.info(f"train dataset: {len(train_dataset)}")
+    for batch_graphs in train_loader:
+        print(batch_graphs)
+    logger.info(f"train dataset: {len(valid_dataset)}")
+    for batch_graphs in valid_loader:
+        print(batch_graphs)
+    logger.info(f"train dataset: {len(test_dataset)}")
+    for batch_graphs in test_loader:
+        print(batch_graphs)
