@@ -138,6 +138,7 @@ if __name__ == "__main__":
     # train args
     parser.add_argument('--do_train', action='store_true', help='train the model')
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
+    parser.add_argument('--embedding_dir', type=str, default='data', help='embedding directory')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
     parser.add_argument('--num_epochs', type=int, default=50, help='number of epochs')
     parser.add_argument('--threshold', type=float, default=0.5, help='threshold for binary classification')
@@ -156,7 +157,7 @@ if __name__ == "__main__":
     # 加载数据集
 
     xml_files = read_xml_dataset(args.input_dir)
-    data_builder = ExpandGraphDataset(xml_files=xml_files)
+    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir)
     # 切分数据集
     train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
     # 使用 DataLoader 加载子集

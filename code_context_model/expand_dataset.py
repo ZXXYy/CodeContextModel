@@ -1,3 +1,4 @@
+import os
 import dgl
 import torch
 import os
@@ -24,8 +25,9 @@ edge_label = {
 }
 
 class ExpandGraphDataset(DGLDataset):
-    def __init__(self, xml_files):
+    def __init__(self, xml_files, embedding_dir):
         self.xml_files = xml_files
+        self.embedding_dir = embedding_dir
         super().__init__(name='expand_graph_dataset')
 
     def process(self, embedding_model='BgeEmbedding'):
@@ -33,7 +35,7 @@ class ExpandGraphDataset(DGLDataset):
         self.graphs = []
         for xml_file in self.xml_files:
             model_dir = xml_file.split('/')[-3]
-            embedding_path = f"data/bge_embedding_results/{model_dir}_{embedding_model}_embedding.pkl"
+            embedding_path = os.path.join(self.embedding_dir, f"{model_dir}_{embedding_model}_embedding.pkl")
             # load embedding
             with open(embedding_path, 'rb') as f:
                 df_embeddings = pd.read_pickle(f)
