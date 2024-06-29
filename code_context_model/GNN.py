@@ -5,12 +5,19 @@ import dgl
 from dgl.nn.pytorch import RelGraphConv
 
 class RGCN(nn.Module):
-    def __init__(self, in_feat, h_feat, out_feat, num_rels):
+    def __init__(self, in_feat, h_feat, out_feat=1, num_rels=8):
+        """    
+        Args:
+            # in_feats: 输入特征的维度(embedding dims)
+            # h_feats: 隐层特征的维度
+            # out_feats: 输出特征的维度
+            # num_rels: 关系的数量
+        """
         super(RGCN, self).__init__()
         self.conv1 = RelGraphConv(in_feat, h_feat, num_rels, regularizer='basis', num_bases=4)
         self.conv2 = RelGraphConv(h_feat, h_feat, num_rels, regularizer='basis', num_bases=4)
-        self.conv3 = RelGraphConv(h_feat, h_feat, num_rels, regularizer='basis', num_bases=4)
-        self.fc = nn.Linear(h_feat, out_feat)
+        self.conv3 = RelGraphConv(h_feat, h_feat//2, num_rels, regularizer='basis', num_bases=4)
+        self.fc = nn.Linear(h_feat//2, out_feat)
 
     def _initialize_parameters(self):
         for m in self.modules():
@@ -28,6 +35,6 @@ class RGCN(nn.Module):
         h = self.conv3(g, h, etype)
         h = F.relu(h)
         h = self.fc(h)
-        return F.softmax(h, dim=1)
+        return F.sigmoid(h, dim=1)
     
 
