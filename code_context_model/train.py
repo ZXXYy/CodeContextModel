@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 import random
 import argparse
 import torch
@@ -6,6 +8,7 @@ import logging
 import dgl
 import numpy as np
 
+from tqdm import tqdm
 from torch import nn
 from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryF1Score, BinaryPrecision, BinaryRecall
@@ -40,9 +43,9 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
     loss_fn = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.001, betas=(0.9, 0.99))
     
-    prec_metrics = BinaryPrecision(threshold=threshold)
-    recall_metrics = BinaryRecall(threshold=threshold)
-    f1_metrics = BinaryF1Score(threshold=threshold)
+    prec_metrics = BinaryPrecision(threshold=threshold).to(device)
+    recall_metrics = BinaryRecall(threshold=threshold).to(device)
+    f1_metrics = BinaryF1Score(threshold=threshold).to(device)
 
     def compute_metrics(logits, labels):
         prec = prec_metrics(logits, labels)
@@ -57,14 +60,17 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         eval_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
-            logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'])
-            loss = loss_fn(logits, batch_graphs.ndata['label'])
+            # 打印形状以调试
+            logger.debug(f"Node features shape: {batch_graphs.ndata['feat'].shape}")
+            logger.debug(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
+            logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
+            loss = loss_fn(logits.squeeze(1), batch_graphs.ndata['label'].float())
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             total_loss += loss.item()
             
-            metrics = compute_metrics(logits, batch_graphs.ndata['label']).item()
+            metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label'])
             train_avg_metrics = {k: train_avg_metrics[k] + metrics[k] for k in metrics}
             if verbose:
                 logger.info(f"Train Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
@@ -73,10 +79,10 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         model.eval()
         with torch.no_grad():
             for i, batch_graphs in enumerate(valid_loader):
-                logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'])
-                loss = loss_fn(logits, batch_graphs.ndata['label'])
+                logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
+                loss = loss_fn(logits.squeeze(1), batch_graphs.ndata['label'].float())
                 eval_loss += loss.item()
-                metrics = compute_metrics(logits, batch_graphs.ndata['label']).item()
+                metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label'])
                 eval_avg_metrics = {k: eval_avg_metrics[k] + metrics[k] for k in metrics}
                 if verbose:
                     logger.info(f"Valid Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
@@ -94,22 +100,26 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
 def test(model, test_loader, **kwargs):
     logger.info("======= Start testing =======")
     threshold = kwargs.get('threshold', 0.5)
-    prec_metrics = BinaryPrecision(threshold=threshold)
-    recall_metrics = BinaryRecall(threshold=threshold)
-    f1_metrics = BinaryF1Score(threshold=threshold)
+    prec_metrics = BinaryPrecision(threshold=threshold).to(device)
+    recall_metrics = BinaryRecall(threshold=threshold).to(device)
+    f1_metrics = BinaryF1Score(threshold=threshold).to(device)
 
     def compute_metrics(logits, labels):
         prec = prec_metrics(logits, labels)
         recall = recall_metrics(logits, labels)
         f1 = f1_metrics(logits, labels)
-        return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
+        return {
+            "precision": prec.cpu().item(),
+            "recall": recall.cpu().item(),
+            "f1": f1.cpu().item()
+        }
     
     model.eval()
     with torch.no_grad():
         test_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         for i, batch_graphs in enumerate(test_loader):
-            logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'])
-            metrics = compute_metrics(logits, batch_graphs.ndata['label'])
+            logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
+            metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label'])
             logger.info(f"Test Batch {i}: Metrics {metrics}")
             test_avg_metrics = {k: test_avg_metrics[k] + metrics[k] for k in metrics}
         
@@ -137,36 +147,45 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # train args
     parser.add_argument('--do_train', action='store_true', help='train the model')
+    parser.add_argument('--device', type=int, default=1, help='device id')
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
     parser.add_argument('--embedding_dir', type=str, default='data', help='embedding directory')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
+    parser.add_argument('--train_batch_size', type=int, default=1, help='train batch size')
     parser.add_argument('--num_epochs', type=int, default=50, help='number of epochs')
     parser.add_argument('--threshold', type=float, default=0.5, help='threshold for binary classification')
     parser.add_argument('--output_dir', type=str, default='output', help='output directory')
     parser.add_argument('--seed', type=int, default=42, help='random seed')
     # test args
     parser.add_argument('--do_test', action='store_true', help='test the model')
+    parser.add_argument('--test_batch_size', type=int, default=1, help='test batch size')
     parser.add_argument('--test_model_pth', type=str, default='model.pth', help='test model path')
+
+    parser.add_argument('--debug', action='store_true', help='debug mode')
     args = parser.parse_args()
 
     args_dict_str = '\n'.join([f"{k}: {v}" for k, v in vars(args).items()])
     logger.info(f"Arguments: \n{args_dict_str}")
+
+    global device
+    device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
     # 设置随机种子
     set_seed(args.seed)
     # 加载数据集
 
     xml_files = read_xml_dataset(args.input_dir)
-    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir)
+    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, device=device, debug=args.debug)
     # 切分数据集
     train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
     # 使用 DataLoader 加载子集
-    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
-    valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
+    train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
+    test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
 
     # 定义模型
-    model = RGCN(in_feats=1024, h_feat=1024, out_feat=1, num_rels=8)
+    model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
+    model.to(device)
 
     if args.do_train:
         train(

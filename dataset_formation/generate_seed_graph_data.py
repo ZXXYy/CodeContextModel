@@ -176,7 +176,7 @@ if __name__ == '__main__':
     main()
 
     # 使用下述代码转化子图为一张完整的图
-    # input_path = '/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn'
+    # input_path = '/data0/xiaoyez/CodeContextModel/data/repo_first_3'
     # context_models = os.listdir(input_path)
     # for context_model in tqdm(context_models):
     #     logger.debug(f"Processing {context_model}")
