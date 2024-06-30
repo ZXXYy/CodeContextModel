@@ -12,6 +12,7 @@ import numpy as np
 
 from tqdm import tqdm
 from torch import nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryF1Score, BinaryPrecision, BinaryRecall
 
@@ -33,6 +34,10 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+# 计算相似度（例如使用余弦相似度）
+def cosine_similarity(x1, x2):
+    return F.cosine_similarity(x1.unsqueeze(0), x2.unsqueeze(0))
+
 
 def train(model, train_loader, valid_loader, verbose=True, **kwargs):
     logger.info("======= Start training =======")
@@ -50,21 +55,59 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
     f1_metrics = BinaryF1Score(threshold=threshold).to(device)
 
     def compute_metrics(logits, labels):
-        prec = prec_metrics(logits, labels)
-        recall = recall_metrics(logits, labels)
-        f1 = f1_metrics(logits, labels)
-        return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
+        seed_indices = (labels == -1).nonzero()
+        seed_embeddings = logits.squeeze(1)[seed_indices]
+        non_seed_indices = (labels != -1).nonzero()
+        non_seed_embeddings = logits.squeeze(1)[non_seed_indices]
+
+        similarities = [cosine_similarity(seed_embeddings[0], embedding) for embedding in non_seed_embeddings]
+        logger.info(f"Similarities: {similarities}")
+        for i in range(1, len(seed_embeddings)):
+            similarities = similarities + [cosine_similarity(seed_embeddings[i], embedding) for embedding in non_seed_embeddings]
+        similarities = torch.sum(torch.stack(similarities), dim=0)
+        logger.info(f"num seed embeddings: {len(seed_embeddings)}, num non seed embeddings: {len(non_seed_embeddings)}")
+        logger.info(f"Similarities: {similarities}")
+        logger.info(f"similarities type: {similarities.shape}")
+        # prec = prec_metrics(logits, labels)
+        # recall = recall_metrics(logits, labels)
+        # f1 = f1_metrics(logits, labels)
+        # return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
 
     def compute_loss(logits, labels):
-        # set pos weight to length of negative samples / length of positive samples
-        loss_fn = nn.BCEWithLogitsLoss(pos_weight=(labels == 0).sum().float() / (labels == 1).sum().float())
-        # 选出不是seed_index的结点
-        non_seed_indices = (labels != -1).nonzero()
-        # 根据non_seed_indices选出对应的logits和labels
-        non_seed_logits = logits.squeeze(1)[non_seed_indices]
-        non_seed_labels = labels.float()[non_seed_indices]
-        loss = loss_fn(non_seed_logits, non_seed_labels)
-        return loss, non_seed_logits, non_seed_labels
+        loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
+        num_seed = (labels == -1).sum().item()
+        num_negative = (labels == 0).sum().item()
+        num_positive = (labels == 1).sum().item()
+        num = min(num_negative, num_seed)
+        seed_indices = (labels == -1).nonzero()
+        positive_indices = (labels == 1).nonzero()
+        negative_indices = (labels == 0).nonzero()
+        old_positive_indices = positive_indices.clone()
+        old_seed_indices = seed_indices.clone()
+        old_negative_indices = negative_indices.clone()
+
+        # 随机重复采样，让负样本数量和正样本数量相等
+        while len(positive_indices) < num:
+            random_element = random.choice(old_positive_indices)
+            logger.info(f"Random element: {torch.tensor([random_element]).shape}")
+            logger.info(f"Positive indices: {positive_indices.shape}")
+            positive_indices = torch.cat((positive_indices, torch.tensor([random_element]).unsqueeze(0).to(device)))
+        while len(seed_indices) < num:
+            random_element = random.choice(old_seed_indices).to(device)
+            seed_indices = torch.cat((seed_indices, torch.tensor([random_element]).unsqueeze(0).to(device)))
+        while len(negative_indices) < num:
+            random_element = random.choice(old_negative_indices).to(device)
+            negative_indices = torch.cat((negative_indices, torch.tensor([random_element]).unsqueeze(0).to(device)))
+       
+        loss = loss_fn(logits.squeeze(1)[seed_indices[:num]], logits.squeeze(1)[positive_indices[:num]], logits.squeeze(1)[negative_indices[:num]])
+         # set pos weight to length of negative samples / length of positive samples
+        # loss_fn = nn.BCEWithLogitsLoss(pos_weight=(labels == 0).sum().float() / (labels == 1).sum().float())
+        # # 选出不是seed_index的结点
+        # non_seed_indices = (labels != -1).nonzero()
+        # # 根据non_seed_indices选出对应的logits和labels
+        # non_seed_logits = logits.squeeze(1)[non_seed_indices]
+        # non_seed_labels = labels.float()[non_seed_indices]
+        return loss # , non_seed_logits, non_seed_labels
 
     for epoch in tqdm(range(num_epochs)):
         total_loss, eval_loss = 0.0, 0.0
@@ -80,14 +123,14 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
             #     logger.info(f"Logits: {logits}")
             #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
             # loss = loss_fn(anchor_embedding, positive_embedding, negative_embedding)
-            loss, non_seed_logits, non_seed_labels = compute_loss(logits, batch_graphs.ndata['label'])
+            loss = compute_loss(logits, batch_graphs.ndata['label'])
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
             
-            metrics = compute_metrics(non_seed_logits, non_seed_labels) # FIXME: wrong train metrics if batchsize > 1
+            metrics = compute_metrics(logits, batch_graphs.ndata['label']) # FIXME: wrong train metrics if batchsize > 1
             train_avg_metrics = {k: train_avg_metrics[k] + metrics[k] for k in metrics}
             if verbose:
                 logger.info(f"Train Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
@@ -97,9 +140,9 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         with torch.no_grad():
             for i, batch_graphs in enumerate(valid_loader):
                 logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
-                loss, non_seed_logits, non_seed_labels = compute_loss(logits, batch_graphs.ndata['label'])
+                loss = compute_loss(logits, batch_graphs.ndata['label'])
                 eval_loss += loss.item()
-                metrics = compute_metrics(non_seed_logits, non_seed_labels)
+                metrics = compute_metrics(logits, batch_graphs.ndata['label'])
                 eval_avg_metrics = {k: eval_avg_metrics[k] + metrics[k] for k in metrics}
                 if verbose:
                     logger.info(f"Valid Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
@@ -172,8 +215,9 @@ def read_xml_dataset(data_dir):
         #     if file_name.endswith(".xml"):
         #         result_xmls.append(os.path.join(dataset_dir, file_name))
         file_names = os.listdir(dataset_dir)
-        if len(file_names) > 0:
-            result_xmls.append(os.path.join(dataset_dir, file_names[random.randint(0, len(file_names) - 1)]))
+        step_1_files = [f for f in file_names if f.startswith("1_step")]
+        if len(step_1_files) > 0:
+            result_xmls.append(os.path.join(dataset_dir, step_1_files[random.randint(0, len(step_1_files) - 1)]))
     
     logger.info(f"Read total xml files: {len(result_xmls)}")
     return result_xmls

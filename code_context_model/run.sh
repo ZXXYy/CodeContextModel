@@ -4,7 +4,6 @@ python code_context_model/train.py \
 --device 0 \
 --train_batch_size 1 \
 --valid_batch_size 1 \
---do_test \
 --test_batch_size 1 \
 --input_dir "/data0/xiaoyez/CodeContextModel/data/repo_first_3" \
 --embedding_dir "/data0/xiaoyez/CodeContextModel/bge_embedding_results" \
@@ -12,7 +11,8 @@ python code_context_model/train.py \
 --num_epochs 50 \
 --lr 1e-4 \
 --threshold 0.5 \
---seed 42 
+--seed 42 \
+--debug
 
 # debug
 # python code_context_model/train.py \
