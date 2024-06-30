@@ -32,8 +32,8 @@ edge_label = {
 
 class ExpandGraphDataset(DGLDataset):
     def __init__(self, xml_files, embedding_dir, device, debug=False):
-        if debug:
-            self.xml_files = xml_files[:512]
+        
+        self.xml_files = xml_files[:512] if debug else xml_files
         self.embedding_dir = embedding_dir
         self.device = device
 
