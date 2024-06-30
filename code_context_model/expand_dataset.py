@@ -117,7 +117,7 @@ def split_dataset(dataset, train_ratio=0.8, valid_ratio=0.1):
     train_indices, test_indices = train_test_split(indices, test_size=0.2, train_size=0.8, random_state=42)
 
     # 划分训练集和验证集
-    train_indices, valid_indices = train_test_split(train_indices, test_size=0.2, train_size=0.8, random_state=42)
+    train_indices, valid_indices = train_test_split(train_indices, test_size=0.1, train_size=0.9, random_state=42)
 
     train_dataset = torch.utils.data.Subset(dataset, train_indices)
     valid_dataset = torch.utils.data.Subset(dataset, valid_indices)

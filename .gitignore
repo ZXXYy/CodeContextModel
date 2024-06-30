@@ -5,3 +5,4 @@ tmp/
 *_results
 model_output
 __pycache__/
+wandb

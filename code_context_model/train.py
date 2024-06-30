@@ -2,10 +2,12 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 import random
+import time
 import argparse
 import torch
 import logging
 import dgl
+import wandb
 import numpy as np
 
 from tqdm import tqdm
@@ -19,6 +21,7 @@ from code_context_model.gnn import RGCN
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
 
+wandb.init(project="code-context-model")
 
 def set_seed(seed):
     random.seed(seed)
@@ -29,9 +32,6 @@ def set_seed(seed):
     os.environ['PYTHONHASHSEED'] = str(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-
-
 
 def train(model, train_loader, valid_loader, verbose=True, **kwargs):
     logger.info("======= Start training =======")
@@ -54,23 +54,23 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
 
     
-    for epoch in range(num_epochs):
+    for epoch in tqdm(range(num_epochs)):
         total_loss, eval_loss = 0.0, 0.0
         train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         eval_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
             # 打印形状以调试
-            logger.debug(f"Node features shape: {batch_graphs.ndata['feat'].shape}")
-            logger.debug(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
+            # logger.debug(f"Node features shape: {batch_graphs.ndata['feat'].shape}")
+            # logger.debug(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
             logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
             loss = loss_fn(logits.squeeze(1), batch_graphs.ndata['label'].float())
+            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
             total_loss += loss.item()
             
-            metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label'])
+            metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label']) # FIXME: wrong train metrics if batchsize > 1
             train_avg_metrics = {k: train_avg_metrics[k] + metrics[k] for k in metrics}
             if verbose:
                 logger.info(f"Train Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
@@ -89,6 +89,17 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         
         train_avg_metrics = {k: v / len(train_loader) for k, v in train_avg_metrics.items()}
         eval_avg_metrics = {k: v / len(valid_loader) for k, v in eval_avg_metrics.items()}
+        wandb.log({
+            "Epoch": epoch,
+            "Train Loss": total_loss,
+            "Train Precision": train_avg_metrics['precision'],
+            "Train Recall": train_avg_metrics['recall'],
+            "Train F1": train_avg_metrics['f1'],
+            "Eval Loss": eval_loss,
+            "Eval Precision": eval_avg_metrics['precision'],
+            "Eval Recall": eval_avg_metrics['recall'],
+            "Eval F1": eval_avg_metrics['f1']
+        })
         logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_avg_metrics}")
         logger.info(f"Epoch {epoch}, Eval  Loss {total_loss}, Eval Metrics {eval_avg_metrics}")
         # save the model
@@ -120,7 +131,7 @@ def test(model, test_loader, **kwargs):
         for i, batch_graphs in enumerate(test_loader):
             logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
             metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label'])
-            logger.info(f"Test Batch {i}: Metrics {metrics}")
+            # logger.info(f"Test Batch {i}: Metrics {metrics}")
             test_avg_metrics = {k: test_avg_metrics[k] + metrics[k] for k in metrics}
         
         test_avg_metrics = {k: v / len(test_loader) for k, v in test_avg_metrics.items()}
@@ -152,6 +163,7 @@ if __name__ == "__main__":
     parser.add_argument('--embedding_dir', type=str, default='data', help='embedding directory')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
     parser.add_argument('--train_batch_size', type=int, default=1, help='train batch size')
+    parser.add_argument('--valid_batch_size', type=int, default=1, help='train batch size')
     parser.add_argument('--num_epochs', type=int, default=50, help='number of epochs')
     parser.add_argument('--threshold', type=float, default=0.5, help='threshold for binary classification')
     parser.add_argument('--output_dir', type=str, default='output', help='output directory')
@@ -164,11 +176,21 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='debug mode')
     args = parser.parse_args()
 
+    args.output_dir = os.path.join(args.output_dir, f"{time.strftime('%m-%d-%H-%M')}")
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+
     args_dict_str = '\n'.join([f"{k}: {v}" for k, v in vars(args).items()])
     logger.info(f"Arguments: \n{args_dict_str}")
 
     global device
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+    
+    # 配置wandb
+    config = wandb.config
+    config.learning_rate = args.lr
+    config.batch_size = args.train_batch_size
+    config.epochs = args.num_epochs
 
     # 设置随机种子
     set_seed(args.seed)
@@ -180,7 +202,7 @@ if __name__ == "__main__":
     train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
     # 使用 DataLoader 加载子集
     train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
-    valid_loader = DataLoader(valid_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
     test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
 
     # 定义模型
@@ -192,7 +214,7 @@ if __name__ == "__main__":
             model=model, 
             train_loader=train_loader, 
             valid_loader=valid_loader, 
-            verbose=True, 
+            verbose=False, 
             lr=args.lr,
             num_epochs=args.num_epochs,
             threshold=args.threshold,
