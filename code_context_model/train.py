@@ -61,8 +61,8 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
             # 打印形状以调试
-            # logger.debug(f"Node features shape: {batch_graphs.ndata['feat'].shape}")
-            # logger.debug(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
+            # logger.info(f"Node features shape: {batch_graphs.ndata['feat'].shape}")
+            # logger.info(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
             logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
             loss = loss_fn(logits.squeeze(1), batch_graphs.ndata['label'].float())
             optimizer.zero_grad()
@@ -101,7 +101,7 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
             "Eval F1": eval_avg_metrics['f1']
         })
         logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_avg_metrics}")
-        logger.info(f"Epoch {epoch}, Eval  Loss {total_loss}, Eval Metrics {eval_avg_metrics}")
+        logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_avg_metrics}")
         # save the model
         torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
         logger.info(f"Model saved at {output_dir}/model_{epoch}.pth")
@@ -142,13 +142,17 @@ def test(model, test_loader, **kwargs):
 def read_xml_dataset(data_dir):
     result_xmls = []
     dir_names = os.listdir(data_dir)
+    
     for dir_name in dir_names:
         dataset_dir = os.path.join(data_dir, dir_name, "seed_expanded")
         if not os.path.exists(dataset_dir):
             continue
-        for file_name in os.listdir(dataset_dir):
-            if file_name.endswith(".xml"):
-                result_xmls.append(os.path.join(dataset_dir, file_name))
+        # for file_name in os.listdir(dataset_dir):
+        #     if file_name.endswith(".xml"):
+        #         result_xmls.append(os.path.join(dataset_dir, file_name))
+        file_names = os.listdir(dataset_dir)
+        if len(file_names) > 0:
+            result_xmls.append(os.path.join(dataset_dir, file_names[random.randint(0, len(file_names) - 1)]))
     
     logger.info(f"Read total xml files: {len(result_xmls)}")
     return result_xmls
@@ -171,7 +175,7 @@ if __name__ == "__main__":
     # test args
     parser.add_argument('--do_test', action='store_true', help='test the model')
     parser.add_argument('--test_batch_size', type=int, default=1, help='test batch size')
-    parser.add_argument('--test_model_pth', type=str, default='model.pth', help='test model path')
+    parser.add_argument('--test_model_pth', type=str, default='model_49.pth', help='test model path')
 
     parser.add_argument('--debug', action='store_true', help='debug mode')
     args = parser.parse_args()
@@ -179,6 +183,7 @@ if __name__ == "__main__":
     args.output_dir = os.path.join(args.output_dir, f"{time.strftime('%m-%d-%H-%M')}")
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
+    args.test_model_pth = os.path.join(args.output_dir, args.test_model_pth)
 
     args_dict_str = '\n'.join([f"{k}: {v}" for k, v in vars(args).items()])
     logger.info(f"Arguments: \n{args_dict_str}")
@@ -191,13 +196,13 @@ if __name__ == "__main__":
     config.learning_rate = args.lr
     config.batch_size = args.train_batch_size
     config.epochs = args.num_epochs
+    config.device = args.device
 
     # 设置随机种子
     set_seed(args.seed)
     # 加载数据集
-
     xml_files = read_xml_dataset(args.input_dir)
-    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, device=device, debug=args.debug)
+    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='codebert', device=device, debug=args.debug)
     # 切分数据集
     train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
     # 使用 DataLoader 加载子集
@@ -205,8 +210,8 @@ if __name__ == "__main__":
     valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
     test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
 
-    # 定义模型
-    model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
+    # # 定义模型
+    model = RGCN(in_feat=768, h_feat=768, out_feat=1, num_rels=8)
     model.to(device)
 
     if args.do_train:
@@ -222,6 +227,7 @@ if __name__ == "__main__":
         )
 
     if args.do_test:
+        logger.info(f"test model path: {args.test_model_pth}")
         model.load_state_dict(torch.load(args.test_model_pth))
         test(
             model=model, 

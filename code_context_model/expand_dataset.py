@@ -2,6 +2,7 @@ import os
 import dgl
 import torch
 import os
+import shutil
 import random
 import logging
 import pandas as pd
@@ -31,20 +32,21 @@ edge_label = {
 }
 
 class ExpandGraphDataset(DGLDataset):
-    def __init__(self, xml_files, embedding_dir, device, debug=False):
+    def __init__(self, xml_files, embedding_dir, embedding_model, device, debug=False):
         
         self.xml_files = xml_files[:512] if debug else xml_files
         self.embedding_dir = embedding_dir
         self.device = device
+        self.embedding_model = embedding_model
 
         super().__init__(name='expand_graph_dataset')
 
-    def process(self, embedding_model='BgeEmbedding'):
-        logger.info(f"building dataset from xml filesm len: {len(self.xml_files)}...")
+    def process(self):
+        logger.info(f"building dataset from xml files len: {len(self.xml_files)}...")
         self.graphs = []
         for xml_file in tqdm(self.xml_files):
             model_dir = xml_file.split('/')[-3]
-            embedding_path = os.path.join(self.embedding_dir, f"{model_dir}_{embedding_model}_embedding.pkl")
+            embedding_path = os.path.join(self.embedding_dir, f"{model_dir}_{self.embedding_model}_embedding.pkl")
             # load embedding
             with open(embedding_path, 'rb') as f:
                 df_embeddings = pd.read_pickle(f)
@@ -61,7 +63,11 @@ class ExpandGraphDataset(DGLDataset):
             vertex_labels = []
             for vertex in vertices.findall('vertex'):
                 node_id = '_'.join([model_dir, vertex.get('kind'), vertex.get('ref_id')]) 
-                node_embedding = list(df_embeddings[df_embeddings['id'] == node_id]['embedding'])
+                if self.embedding_model == 'codebert':
+                    node_embedding = list(df_embeddings[df_embeddings['id'] == node_id]['embedding'])
+                    node_embedding = node_embedding[0].tolist()
+                else:
+                    node_embedding = list(df_embeddings[df_embeddings['id'] == node_id]['embedding'])
                 vertex_features.append(node_embedding)
                 if vertex.get('origin', '0') == '1' and vertex.get('seed', '0') == '0':
                     vertex_labels.append(1)
@@ -69,7 +75,7 @@ class ExpandGraphDataset(DGLDataset):
                     vertex_labels.append(0)
 
             # print(vertex_features)
-            logger.debug(f"Read vertex_features features len: {len(vertex_features)}")
+            # logger.info(f"Read vertex_features features len: {len(vertex_features)}")
             # 将顶点特征转换为张量
             node_features = torch.tensor(vertex_features)
             node_labels = torch.tensor(vertex_labels)
@@ -131,7 +137,7 @@ if __name__ == '__main__':
     xml_files = [os.path.join(xml_dir, f) for f in os.listdir(xml_dir) if f.endswith('.xml')]
     # xml_files = ['data/mylyn/60/seed_expanded/1_step_seeds_3_expanded_model.xml']
     print(xml_files)
-    data_builder = ExpandGraphDataset(xml_files, "/data0/xiaoyez/CodeContextModel/bge_embedding_results", torch.device('cpu'), debug=True)
+    data_builder = ExpandGraphDataset(xml_files, "/data0/xiaoyez/CodeContextModel/codebert_embedding_results", 'codebert', torch.device('cpu'), debug=True)
     # 切分数据集
     train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
     # 使用 DataLoader 加载子集
@@ -148,3 +154,22 @@ if __name__ == '__main__':
     logger.info(f"train dataset: {len(test_dataset)}")
     for batch_graphs in test_loader:
         print(batch_graphs)
+
+    # file_path = '/data2/shunliu/pythonfile/code_context_model_prediction/params_validation/git_repo_code/my_mylyn/repo_first_3/1005/1_codebert_embedding.pkl'
+    # df_embeddings = pd.read_pickle(file_path)
+    # print(df_embeddings)
+
+
+    # source_dir = "/data2/shunliu/pythonfile/code_context_model_prediction/params_validation/git_repo_code/my_mylyn/repo_first_3"
+    # target_dir = "codebert_embedding_results"
+    # # 确保目标目录存在
+    # os.makedirs(target_dir, exist_ok=True)
+    # # 递归查找并复制文件
+    # for id_folder in tqdm(os.listdir(source_dir)):
+    #     source_file = os.path.join(source_dir, id_folder, "1_codebert_embedding.pkl")
+    #     if not os.path.exists(source_file):
+    #         continue
+    #     # rename the file
+    #     target_file = os.path.join(target_dir, f"{id_folder}_codebert_embedding.pkl")
+    #     shutil.copy(source_file, target_file)
+    #     print(f"Copied: {source_file} to {target_dir}")
