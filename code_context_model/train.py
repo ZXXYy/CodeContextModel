@@ -33,6 +33,7 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+
 def train(model, train_loader, valid_loader, verbose=True, **kwargs):
     logger.info("======= Start training =======")
     lr = kwargs.get('lr', 0.01)
@@ -40,7 +41,8 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
     threshold = kwargs.get('threshold', 0.5)
     output_dir = kwargs.get('output_dir', 'output')
     # 定义损失函数和优化器
-    loss_fn = nn.BCELoss()
+    # loss_fn = nn.BCELoss()
+    # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.001, betas=(0.9, 0.99))
     
     prec_metrics = BinaryPrecision(threshold=threshold).to(device)
@@ -53,7 +55,17 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         f1 = f1_metrics(logits, labels)
         return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
 
-    
+    def compute_loss(logits, labels):
+        # set pos weight to length of negative samples / length of positive samples
+        loss_fn = nn.BCEWithLogitsLoss(pos_weight=(labels == 0).sum().float() / (labels == 1).sum().float())
+        # 选出不是seed_index的结点
+        non_seed_indices = (labels != -1).nonzero()
+        # 根据non_seed_indices选出对应的logits和labels
+        non_seed_logits = logits.squeeze(1)[non_seed_indices]
+        non_seed_labels = labels.float()[non_seed_indices]
+        loss = loss_fn(non_seed_logits, non_seed_labels)
+        return loss, non_seed_logits, non_seed_labels
+
     for epoch in tqdm(range(num_epochs)):
         total_loss, eval_loss = 0.0, 0.0
         train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
@@ -64,13 +76,18 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
             # logger.info(f"Node features shape: {batch_graphs.ndata['feat'].shape}")
             # logger.info(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
             logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
-            loss = loss_fn(logits.squeeze(1), batch_graphs.ndata['label'].float())
+            # if epoch > 10:
+            #     logger.info(f"Logits: {logits}")
+            #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
+            # loss = loss_fn(anchor_embedding, positive_embedding, negative_embedding)
+            loss, non_seed_logits, non_seed_labels = compute_loss(logits, batch_graphs.ndata['label'])
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
             
-            metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label']) # FIXME: wrong train metrics if batchsize > 1
+            metrics = compute_metrics(non_seed_logits, non_seed_labels) # FIXME: wrong train metrics if batchsize > 1
             train_avg_metrics = {k: train_avg_metrics[k] + metrics[k] for k in metrics}
             if verbose:
                 logger.info(f"Train Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
@@ -80,9 +97,9 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         with torch.no_grad():
             for i, batch_graphs in enumerate(valid_loader):
                 logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
-                loss = loss_fn(logits.squeeze(1), batch_graphs.ndata['label'].float())
+                loss, non_seed_logits, non_seed_labels = compute_loss(logits, batch_graphs.ndata['label'])
                 eval_loss += loss.item()
-                metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label'])
+                metrics = compute_metrics(non_seed_logits, non_seed_labels)
                 eval_avg_metrics = {k: eval_avg_metrics[k] + metrics[k] for k in metrics}
                 if verbose:
                     logger.info(f"Valid Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
@@ -130,7 +147,11 @@ def test(model, test_loader, **kwargs):
         test_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         for i, batch_graphs in enumerate(test_loader):
             logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
-            metrics = compute_metrics(logits.squeeze(1), batch_graphs.ndata['label'])
+            non_seed_indices = (batch_graphs.ndata['label'] != -1).nonzero()
+            # 根据non_seed_indices选出对应的logits和labels
+            non_seed_logits = logits.squeeze(1)[non_seed_indices]
+            non_seed_labels = batch_graphs.ndata['label'].float()[non_seed_indices]
+            metrics = compute_metrics(non_seed_logits, non_seed_labels)
             # logger.info(f"Test Batch {i}: Metrics {metrics}")
             test_avg_metrics = {k: test_avg_metrics[k] + metrics[k] for k in metrics}
         
@@ -175,7 +196,7 @@ if __name__ == "__main__":
     # test args
     parser.add_argument('--do_test', action='store_true', help='test the model')
     parser.add_argument('--test_batch_size', type=int, default=1, help='test batch size')
-    parser.add_argument('--test_model_pth', type=str, default='model_49.pth', help='test model path')
+    parser.add_argument('--test_model_pth', type=str, default='model_48.pth', help='test model path')
 
     parser.add_argument('--debug', action='store_true', help='debug mode')
     args = parser.parse_args()
@@ -183,7 +204,8 @@ if __name__ == "__main__":
     args.output_dir = os.path.join(args.output_dir, f"{time.strftime('%m-%d-%H-%M')}")
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-    args.test_model_pth = os.path.join(args.output_dir, args.test_model_pth)
+    if args.do_train:
+        args.test_model_pth = os.path.join(args.output_dir, args.test_model_pth)    
 
     args_dict_str = '\n'.join([f"{k}: {v}" for k, v in vars(args).items()])
     logger.info(f"Arguments: \n{args_dict_str}")
@@ -202,7 +224,7 @@ if __name__ == "__main__":
     set_seed(args.seed)
     # 加载数据集
     xml_files = read_xml_dataset(args.input_dir)
-    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='codebert', device=device, debug=args.debug)
+    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', device=device, debug=args.debug)
     # 切分数据集
     train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
     # 使用 DataLoader 加载子集
@@ -211,7 +233,8 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
 
     # # 定义模型
-    model = RGCN(in_feat=768, h_feat=768, out_feat=1, num_rels=8)
+    model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
+    logger.info(f"Model Parameters: {sum(p.numel() for p in model.parameters())}")
     model.to(device)
 
     if args.do_train:

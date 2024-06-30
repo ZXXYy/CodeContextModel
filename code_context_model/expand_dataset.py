@@ -69,10 +69,13 @@ class ExpandGraphDataset(DGLDataset):
                 else:
                     node_embedding = list(df_embeddings[df_embeddings['id'] == node_id]['embedding'])
                 vertex_features.append(node_embedding)
-                if vertex.get('origin', '0') == '1' and vertex.get('seed', '0') == '0':
-                    vertex_labels.append(1)
+                if vertex.get('seed', '0') == '1':
+                    vertex_labels.append(-1)
                 else:
-                    vertex_labels.append(0)
+                    if vertex.get('origin', '0') == '1':
+                        vertex_labels.append(1)
+                    else:
+                        vertex_labels.append(0)
 
             # print(vertex_features)
             # logger.info(f"Read vertex_features features len: {len(vertex_features)}")
