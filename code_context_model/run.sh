@@ -2,7 +2,7 @@
 python code_context_model/train.py \
 --do_train \
 --device 0 \
---train_batch_size 1 \
+--train_batch_size 8 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
 --input_dir "/data0/xiaoyez/CodeContextModel/data/repo_first_3" \
@@ -12,7 +12,7 @@ python code_context_model/train.py \
 --lr 1e-4 \
 --threshold 0.5 \
 --seed 42 \
---debug
+
 
 # debug
 # python code_context_model/train.py \

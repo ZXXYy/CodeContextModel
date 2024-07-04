@@ -54,28 +54,21 @@ def euclidean_distance(x1, x2):
     return torch.dist(x1, x2).item()
 
 
-def train(model, train_loader, valid_loader, verbose=True, **kwargs):
-    logger.info("======= Start training =======")
-    lr = kwargs.get('lr', 0.01)
-    num_epochs = kwargs.get('num_epochs', 50)
-    threshold = kwargs.get('threshold', 0.5)
-    output_dir = kwargs.get('output_dir', 'output')
-    # 定义损失函数和优化器
-    # loss_fn = nn.BCELoss()
-    # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.001, betas=(0.9, 0.99))
-    
-    prec_metrics = BinaryPrecision(threshold=threshold).to(device)
-    recall_metrics = BinaryRecall(threshold=threshold).to(device)
-    f1_metrics = BinaryF1Score(threshold=threshold).to(device)
-
-    def compute_metrics(logits, labels):
+def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
+    batch_size = len(batch_num_nodes)
+    start_idx = 0
+    total_hit = 0
+    logger.debug(f"Batch num:{batch_num_nodes}")
+    for k in range(batch_size):
+        labels = batch_labels[start_idx : start_idx + batch_num_nodes[k]]
+        logits = batch_logits[start_idx : start_idx + batch_num_nodes[k]]
         seed_indices = (labels == -1).nonzero()
-        seed_embeddings = logits.squeeze(1)[seed_indices]
+        seed_embeddings = logits[seed_indices]
         non_seed_indices = (labels != -1).nonzero()
-        non_seed_embeddings = logits.squeeze(1)[non_seed_indices]
+        non_seed_embeddings = logits[non_seed_indices]
 
         similarities = []
+        logger.debug(f"num seed indices: {len(seed_indices)}, num non seed indices: {len(non_seed_indices)}")
         logger.debug(f"num seed embeddings: {len(seed_embeddings)}, num non seed embeddings: {len(non_seed_embeddings)}")
         for i in range(0, len(seed_embeddings)):
             temp = torch.tensor([]).to(device)
@@ -96,18 +89,29 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
             idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
             if labels[idx] == 1:
                 hit = 1
-        return {'hit': hit}
-        # prec = prec_metrics(logits, labels)
-        # recall = recall_metrics(logits, labels)
-        # f1 = f1_metrics(logits, labels)
-        # return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
+        total_hit += hit
+        start_idx += batch_num_nodes[k]
 
-    def compute_loss(logits, labels):
-        loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
+    return {'hit': total_hit}
+    # prec = prec_metrics(logits, labels)
+    # recall = recall_metrics(logits, labels)
+    # f1 = f1_metrics(logits, labels)
+    # return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
+
+def compute_loss(batch_logits, batch_labels, batch_num_nodes):
+    batch_size = len(batch_num_nodes)
+    start_idx = 0
+    total_loss = 0
+    logger.debug(f"Batch num: {batch_num_nodes}")
+
+    for i in range(batch_size):
+        # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
+        labels = batch_labels[start_idx : start_idx + batch_num_nodes[i]]
+        logits = batch_logits[start_idx : start_idx + batch_num_nodes[i]]
         seed_indices = (labels == -1).nonzero()
         positive_indices = (labels == 1).nonzero()
         negative_indices = (labels == 0).nonzero()
-        embeddings = logits.squeeze(1)
+        embeddings = logits
         logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
         
         # 生成所有可能的 (seed, positive) 组合对
@@ -140,18 +144,36 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         negative_loss = torch.mean((1 - negative_labels) * torch.clamp(margin - negative_distances, min=0.0).pow(2))
 
         # 总的 Contrastive Loss
-        loss = positive_loss + negative_loss
-        
-        return loss # , non_seed_logits, non_seed_labels
+        total_loss += positive_loss + negative_loss
+        start_idx += batch_num_nodes[i]
+
+    return total_loss # , non_seed_logits, non_seed_labels
+
+def train(model, train_loader, valid_loader, verbose=True, **kwargs):
+    logger.info("======= Start training =======")
+    lr = kwargs.get('lr', 0.01)
+    num_epochs = kwargs.get('num_epochs', 50)
+    threshold = kwargs.get('threshold', 0.5)
+    output_dir = kwargs.get('output_dir', 'output')
+    # 定义损失函数和优化器
+    # loss_fn = nn.BCELoss()
+    # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.001, betas=(0.9, 0.99))
+    
+    prec_metrics = BinaryPrecision(threshold=threshold).to(device)
+    recall_metrics = BinaryRecall(threshold=threshold).to(device)
+    f1_metrics = BinaryF1Score(threshold=threshold).to(device)
 
     for epoch in tqdm(range(num_epochs)):
         total_loss, eval_loss = 0.0, 0.0
+        train_graph_num_cnt = 0
         # train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         # eval_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         train_hit_rate = {"hit": 0.0}
         eval_hit_rate = {"hit": 0.0}
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
+            train_graph_num_cnt += len(batch_graphs.batch_num_nodes())
             # 打印形状以调试
             # logger.info(f"Node features shape: {batch_graphs.ndata['feat'].shape}")
             # logger.info(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
@@ -160,14 +182,14 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
             #     logger.info(f"Logits: {logits}")
             #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
             # loss = loss_fn(anchor_embedding, positive_embedding, negative_embedding)
-            loss = compute_loss(logits, batch_graphs.ndata['label'])
+            loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
             
-            metrics = compute_metrics(logits, batch_graphs.ndata['label']) # FIXME: wrong train metrics if batchsize > 1
+            metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist()) # FIXME: wrong train metrics if batchsize > 1
             train_hit_rate = {k: train_hit_rate[k] + metrics[k] for k in metrics}
             if verbose:
                 logger.info(f"Train Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
@@ -175,17 +197,19 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         # evaluate
         model.eval()
         with torch.no_grad():
+            eval_graph_num_cnt = 0
             for i, batch_graphs in enumerate(valid_loader):
+                eval_graph_num_cnt += len(batch_graphs.batch_num_nodes())
                 logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
-                loss = compute_loss(logits, batch_graphs.ndata['label'])
+                loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
                 eval_loss += loss.item()
-                metrics = compute_metrics(logits, batch_graphs.ndata['label'])
+                metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
                 eval_hit_rate = {k: eval_hit_rate[k] + metrics[k] for k in metrics}
                 if verbose:
                     logger.info(f"Valid Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
         
-        train_hit_rate = {k: v / len(train_loader) for k, v in train_hit_rate.items()}
-        eval_hit_rate = {k: v / len(valid_loader) for k, v in eval_hit_rate.items()}
+        train_hit_rate = {k: v / train_graph_num_cnt for k, v in train_hit_rate.items()}
+        eval_hit_rate = {k: v / eval_graph_num_cnt for k, v in eval_hit_rate.items()}
         wandb.log({
             "Epoch": epoch,
             "Train Loss": total_loss,
@@ -204,35 +228,22 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
 def test(model, test_loader, **kwargs):
     logger.info("======= Start testing =======")
     threshold = kwargs.get('threshold', 0.5)
-    prec_metrics = BinaryPrecision(threshold=threshold).to(device)
-    recall_metrics = BinaryRecall(threshold=threshold).to(device)
-    f1_metrics = BinaryF1Score(threshold=threshold).to(device)
 
-    def compute_metrics(logits, labels):
-        prec = prec_metrics(logits, labels)
-        recall = recall_metrics(logits, labels)
-        f1 = f1_metrics(logits, labels)
-        return {
-            "precision": prec.cpu().item(),
-            "recall": recall.cpu().item(),
-            "f1": f1.cpu().item()
-        }
-    
     model.eval()
     with torch.no_grad():
-        test_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+        test_hit_rate = {"hit": 0.0}
         for i, batch_graphs in enumerate(test_loader):
             logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
-            non_seed_indices = (batch_graphs.ndata['label'] != -1).nonzero()
-            # 根据non_seed_indices选出对应的logits和labels
-            non_seed_logits = logits.squeeze(1)[non_seed_indices]
-            non_seed_labels = batch_graphs.ndata['label'].float()[non_seed_indices]
-            metrics = compute_metrics(non_seed_logits, non_seed_labels)
+            # non_seed_indices = (batch_graphs.ndata['label'] != -1).nonzero()
+            # # 根据non_seed_indices选出对应的logits和labels
+            # non_seed_logits = logits.squeeze(1)[non_seed_indices]
+            # non_seed_labels = batch_graphs.ndata['label'].float()[non_seed_indices]
+            metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
             # logger.info(f"Test Batch {i}: Metrics {metrics}")
-            test_avg_metrics = {k: test_avg_metrics[k] + metrics[k] for k in metrics}
+            test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
         
-        test_avg_metrics = {k: v / len(test_loader) for k, v in test_avg_metrics.items()}
-        logger.info(f"Test finished, Test Metrics {test_avg_metrics}")
+        test_hit_rate = {k: v / len(test_loader) for k, v in test_hit_rate.items()}
+        logger.info(f"Test finished, Test Metrics {test_hit_rate}")
     
 
 
@@ -281,8 +292,12 @@ if __name__ == "__main__":
     args.output_dir = os.path.join(args.output_dir, f"{time.strftime('%m-%d-%H-%M')}")
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
+    if args.debug:
+        args.num_epochs = 1 
+        args.test_model_pth = 'model_0.pth'
     if args.do_train:
-        args.test_model_pth = os.path.join(args.output_dir, args.test_model_pth)    
+        args.test_model_pth = os.path.join(args.output_dir, args.test_model_pth)   
+    
 
     args_dict_str = '\n'.join([f"{k}: {v}" for k, v in vars(args).items()])
     logger.info(f"Arguments: \n{args_dict_str}")
