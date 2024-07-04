@@ -12,6 +12,7 @@ import numpy as np
 
 from tqdm import tqdm
 from torch import nn
+from itertools import product
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryF1Score, BinaryPrecision, BinaryRecall
@@ -36,6 +37,11 @@ def set_seed(seed):
 
 # 计算相似度（例如使用余弦相似度）
 def cosine_similarity(x1, x2):
+    # 确保输入是1D张量，如果输入是2D或更高维度的张量，可以根据实际需求调整
+    if x1.dim() > 1:
+        x1 = x1.view(-1)
+    if x2.dim() > 1:
+        x2 = x2.view(-1)
     return F.cosine_similarity(x1.unsqueeze(0), x2.unsqueeze(0))
 
 
@@ -60,14 +66,28 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         non_seed_indices = (labels != -1).nonzero()
         non_seed_embeddings = logits.squeeze(1)[non_seed_indices]
 
-        similarities = [cosine_similarity(seed_embeddings[0], embedding) for embedding in non_seed_embeddings]
-        logger.info(f"Similarities: {similarities}")
-        for i in range(1, len(seed_embeddings)):
-            similarities = similarities + [cosine_similarity(seed_embeddings[i], embedding) for embedding in non_seed_embeddings]
-        similarities = torch.sum(torch.stack(similarities), dim=0)
+        similarities = []
         logger.info(f"num seed embeddings: {len(seed_embeddings)}, num non seed embeddings: {len(non_seed_embeddings)}")
+        for i in range(0, len(seed_embeddings)):
+            temp = torch.tensor([]).to(device)
+            for embedding in non_seed_embeddings:
+                temp = torch.cat((temp, cosine_similarity(seed_embeddings[i], embedding)))
+            logger.info(f"similarities for seed_embeddings {i}: {temp}")
+            similarities = similarities + [temp]
+        logger.info(f"Similarities: {similarities}")
+        similarities = torch.sum(torch.stack(similarities), dim=0)
         logger.info(f"Similarities: {similarities}")
         logger.info(f"similarities type: {similarities.shape}")
+        # find top3 similar embeddings
+        topk = 3 if len(non_seed_indices) >= 3 else len(non_seed_indices)
+        topk_indices = torch.topk(similarities, topk).indices
+        logger.info(f"Top3 indices: {topk_indices}")
+        hit = 0
+        for i in range(0, len(topk_indices)):
+            idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
+            if labels[idx] == 1:
+                hit = 1
+        return {'hit': hit}
         # prec = prec_metrics(logits, labels)
         # recall = recall_metrics(logits, labels)
         # f1 = f1_metrics(logits, labels)
@@ -75,44 +95,53 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
 
     def compute_loss(logits, labels):
         loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
-        num_seed = (labels == -1).sum().item()
-        num_negative = (labels == 0).sum().item()
-        num_positive = (labels == 1).sum().item()
-        num = min(num_negative, num_seed)
         seed_indices = (labels == -1).nonzero()
         positive_indices = (labels == 1).nonzero()
         negative_indices = (labels == 0).nonzero()
-        old_positive_indices = positive_indices.clone()
-        old_seed_indices = seed_indices.clone()
-        old_negative_indices = negative_indices.clone()
+        embeddings = logits.squeeze(1)
+        logger.info(f"Seed Indices: {seed_indices}")
+        logger.info(f"Positive Indices: {positive_indices}")
+        # 生成所有可能的 (seed, positive) 组合对
+        seed_positive_pairs = list(product(seed_indices, positive_indices))
+        logger.info(f"Seed Positive Pairs: {seed_positive_pairs}")
+        # 提取组合对的嵌入
+        for pair in seed_positive_pairs:
+            logger.info(f"Seed Pair: {pair}")
+            logger.info(f"Embedding: {embeddings[pair[0]]}")
+        seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_positive_pairs])
+        positive_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_positive_pairs])
+        # 定义 margin
+        margin = 1.0
+        # 计算正样本对之间的欧氏距离
+        positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
+        # 构建正样本对标签（全1）
+        positive_labels = torch.ones(positive_distances.size(), device=positive_distances.device)
+        # 计算正样本对的 Contrastive Loss
+        positive_loss = torch.mean(positive_labels * positive_distances.pow(2)) 
 
-        # 随机重复采样，让负样本数量和正样本数量相等
-        while len(positive_indices) < num:
-            random_element = random.choice(old_positive_indices)
-            logger.info(f"Random element: {torch.tensor([random_element]).shape}")
-            logger.info(f"Positive indices: {positive_indices.shape}")
-            positive_indices = torch.cat((positive_indices, torch.tensor([random_element]).unsqueeze(0).to(device)))
-        while len(seed_indices) < num:
-            random_element = random.choice(old_seed_indices).to(device)
-            seed_indices = torch.cat((seed_indices, torch.tensor([random_element]).unsqueeze(0).to(device)))
-        while len(negative_indices) < num:
-            random_element = random.choice(old_negative_indices).to(device)
-            negative_indices = torch.cat((negative_indices, torch.tensor([random_element]).unsqueeze(0).to(device)))
-       
-        loss = loss_fn(logits.squeeze(1)[seed_indices[:num]], logits.squeeze(1)[positive_indices[:num]], logits.squeeze(1)[negative_indices[:num]])
-         # set pos weight to length of negative samples / length of positive samples
-        # loss_fn = nn.BCEWithLogitsLoss(pos_weight=(labels == 0).sum().float() / (labels == 1).sum().float())
-        # # 选出不是seed_index的结点
-        # non_seed_indices = (labels != -1).nonzero()
-        # # 根据non_seed_indices选出对应的logits和labels
-        # non_seed_logits = logits.squeeze(1)[non_seed_indices]
-        # non_seed_labels = labels.float()[non_seed_indices]
+        # 生成所有可能的 (seed, negative) 组合对
+        seed_negative_pairs = list(product(seed_indices, negative_indices))
+        # 提取组合对的嵌入
+        seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_negative_pairs])
+        negative_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_negative_pairs])
+        # 计算负样本对之间的欧氏距离
+        negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
+        # 构建负样本对标签（全0）
+        negative_labels = torch.zeros(negative_distances.size(), device=negative_distances.device)
+        # 计算负样本对的 Contrastive Loss
+        negative_loss = torch.mean((1 - negative_labels) * torch.clamp(margin - negative_distances, min=0.0).pow(2))
+
+        # 总的 Contrastive Loss
+        loss = positive_loss + negative_loss
+        
         return loss # , non_seed_logits, non_seed_labels
 
     for epoch in tqdm(range(num_epochs)):
         total_loss, eval_loss = 0.0, 0.0
-        train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
-        eval_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+        # train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+        # eval_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+        train_hit_rate = {"hit": 0.0}
+        eval_hit_rate = {"hit": 0.0}
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
             # 打印形状以调试
@@ -131,7 +160,7 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
             total_loss += loss.item()
             
             metrics = compute_metrics(logits, batch_graphs.ndata['label']) # FIXME: wrong train metrics if batchsize > 1
-            train_avg_metrics = {k: train_avg_metrics[k] + metrics[k] for k in metrics}
+            train_hit_rate = {k: train_hit_rate[k] + metrics[k] for k in metrics}
             if verbose:
                 logger.info(f"Train Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
         
@@ -143,25 +172,21 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
                 loss = compute_loss(logits, batch_graphs.ndata['label'])
                 eval_loss += loss.item()
                 metrics = compute_metrics(logits, batch_graphs.ndata['label'])
-                eval_avg_metrics = {k: eval_avg_metrics[k] + metrics[k] for k in metrics}
+                eval_hit_rate = {k: eval_hit_rate[k] + metrics[k] for k in metrics}
                 if verbose:
                     logger.info(f"Valid Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
         
-        train_avg_metrics = {k: v / len(train_loader) for k, v in train_avg_metrics.items()}
-        eval_avg_metrics = {k: v / len(valid_loader) for k, v in eval_avg_metrics.items()}
+        train_hit_rate = {k: v / len(train_loader) for k, v in train_hit_rate.items()}
+        eval_hit_rate = {k: v / len(valid_loader) for k, v in eval_hit_rate.items()}
         wandb.log({
             "Epoch": epoch,
             "Train Loss": total_loss,
-            "Train Precision": train_avg_metrics['precision'],
-            "Train Recall": train_avg_metrics['recall'],
-            "Train F1": train_avg_metrics['f1'],
+            "Train Hit Rate": train_hit_rate['hit'],
             "Eval Loss": eval_loss,
-            "Eval Precision": eval_avg_metrics['precision'],
-            "Eval Recall": eval_avg_metrics['recall'],
-            "Eval F1": eval_avg_metrics['f1']
+            "Eval Hit Rate": eval_hit_rate['hit'],
         })
-        logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_avg_metrics}")
-        logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_avg_metrics}")
+        logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_hit_rate}")
+        logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
         # save the model
         torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
         logger.info(f"Model saved at {output_dir}/model_{epoch}.pth")
