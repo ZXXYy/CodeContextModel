@@ -51,7 +51,7 @@ class RGCN(nn.Module):
         h = self.conv2(g, h, etype)
         h = F.relu(h)
         h = self.conv3(g, h, etype)
-        h = F.relu(h)
+        # h = F.relu(h)
         # return self.mlp(h)
         return h
         # return F.sigmoid(h)

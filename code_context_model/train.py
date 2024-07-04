@@ -44,6 +44,13 @@ def cosine_similarity(x1, x2):
         x2 = x2.view(-1)
     return F.cosine_similarity(x1.unsqueeze(0), x2.unsqueeze(0))
 
+def pairwise_cosine_similarity(x1, x2):
+    similarities = []
+    for i in range(x1.size(0)):
+        similarity = cosine_similarity(x1[i], x2[i])
+        similarities.append(similarity)
+    return torch.stack(similarities)
+    
 def euclidean_distance(x1, x2):
     # 确保输入是1D张量，如果输入是2D或更高维度的张量，可以根据实际需求调整
     if x1.dim() > 1:
@@ -57,7 +64,11 @@ def euclidean_distance(x1, x2):
 def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     batch_size = len(batch_num_nodes)
     start_idx = 0
-    total_hit = 0
+    total_hit = {
+        'top3_hit': 0,
+        'top4_hit': 0,
+        'top5_hit': 0,
+    }
     logger.debug(f"Batch num:{batch_num_nodes}")
     for k in range(batch_size):
         labels = batch_labels[start_idx : start_idx + batch_num_nodes[k]]
@@ -81,18 +92,21 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
         logger.debug(f"Similarities: {similarities}")
         logger.debug(f"similarities type: {similarities.shape}")
         # find top3 similar embeddings
-        topk = 3 if len(non_seed_indices) >= 3 else len(non_seed_indices)
-        topk_indices = torch.topk(similarities, topk).indices
-        logger.debug(f"Top3 indices: {topk_indices}")
-        hit = 0
-        for i in range(0, len(topk_indices)):
-            idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
-            if labels[idx] == 1:
-                hit = 1
-        total_hit += hit
+        for topk in range(3,6):
+            temp = topk
+            topk = topk if len(non_seed_indices) >= topk else len(non_seed_indices)
+            topk_indices = torch.topk(similarities, topk).indices
+            logger.debug(f"Top{topk} indices: {topk_indices}")
+            hit = 0
+            for i in range(0, len(topk_indices)):
+                idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
+                if labels[idx] == 1:
+                    hit = 1
+                    break
+            total_hit[f"top{temp}_hit"] += hit
         start_idx += batch_num_nodes[k]
 
-    return {'hit': total_hit}
+    return total_hit
     # prec = prec_metrics(logits, labels)
     # recall = recall_metrics(logits, labels)
     # f1 = f1_metrics(logits, labels)
@@ -124,6 +138,7 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         margin = 1.0
         # 计算正样本对之间的欧氏距离
         positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
+        # positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
         # 构建正样本对标签（全1）
         positive_labels = torch.ones(positive_distances.size(), device=positive_distances.device)
         # 计算正样本对的 Contrastive Loss
@@ -138,6 +153,7 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         negative_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_negative_pairs])
         # 计算负样本对之间的欧氏距离
         negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
+        # negative_distances = pairwise_cosine_similarity(seed_pair_embeddings, negative_pair_embeddings)
         # 构建负样本对标签（全0）
         negative_labels = torch.zeros(negative_distances.size(), device=negative_distances.device)
         # 计算负样本对的 Contrastive Loss
@@ -169,8 +185,16 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         train_graph_num_cnt = 0
         # train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         # eval_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
-        train_hit_rate = {"hit": 0.0}
-        eval_hit_rate = {"hit": 0.0}
+        train_hit_rate = {
+            'top3_hit': 0,
+            'top4_hit': 0,
+            'top5_hit': 0,
+        }
+        eval_hit_rate = {
+            'top3_hit': 0,
+            'top4_hit': 0,
+            'top5_hit': 0,
+        }
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
             train_graph_num_cnt += len(batch_graphs.batch_num_nodes())
@@ -210,13 +234,14 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         
         train_hit_rate = {k: v / train_graph_num_cnt for k, v in train_hit_rate.items()}
         eval_hit_rate = {k: v / eval_graph_num_cnt for k, v in eval_hit_rate.items()}
-        wandb.log({
+        wandb_log = {
             "Epoch": epoch,
             "Train Loss": total_loss,
-            "Train Hit Rate": train_hit_rate['hit'],
             "Eval Loss": eval_loss,
-            "Eval Hit Rate": eval_hit_rate['hit'],
-        })
+        }
+        wandb_log.update(train_hit_rate)
+        wandb_log.update(eval_hit_rate)
+        wandb.log(wandb_log)
         logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_hit_rate}")
         logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
         # save the model

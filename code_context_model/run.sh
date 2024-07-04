@@ -1,17 +1,18 @@
 # code_context_model/run.sh
 python code_context_model/train.py \
 --do_train \
---device 0 \
---train_batch_size 8 \
+--device 3 \
+--train_batch_size 32 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
 --input_dir "/data0/xiaoyez/CodeContextModel/data/repo_first_3" \
 --embedding_dir "/data0/xiaoyez/CodeContextModel/bge_embedding_results" \
 --output_dir "/data0/xiaoyez/CodeContextModel/model_output" \
 --num_epochs 50 \
---lr 1e-4 \
+--lr 5e-4 \
 --threshold 0.5 \
 --seed 42 \
+--do_test
 
 
 # debug
