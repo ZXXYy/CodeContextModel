@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryF1Score, BinaryPrecision, BinaryRecall
 
-from code_context_model.expand_dataset import ExpandGraphDataset, split_dataset
+from code_context_model.build_dataset import ExpandGraphDataset, split_dataset
 from code_context_model.gnn import RGCN
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
@@ -44,6 +44,15 @@ def cosine_similarity(x1, x2):
         x2 = x2.view(-1)
     return F.cosine_similarity(x1.unsqueeze(0), x2.unsqueeze(0))
 
+def euclidean_distance(x1, x2):
+    # 确保输入是1D张量，如果输入是2D或更高维度的张量，可以根据实际需求调整
+    if x1.dim() > 1:
+        x1 = x1.view(-1)
+    if x2.dim() > 1:
+        x2 = x2.view(-1)
+    # 计算欧式距离
+    return torch.dist(x1, x2).item()
+
 
 def train(model, train_loader, valid_loader, verbose=True, **kwargs):
     logger.info("======= Start training =======")
@@ -67,21 +76,21 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         non_seed_embeddings = logits.squeeze(1)[non_seed_indices]
 
         similarities = []
-        logger.info(f"num seed embeddings: {len(seed_embeddings)}, num non seed embeddings: {len(non_seed_embeddings)}")
+        logger.debug(f"num seed embeddings: {len(seed_embeddings)}, num non seed embeddings: {len(non_seed_embeddings)}")
         for i in range(0, len(seed_embeddings)):
             temp = torch.tensor([]).to(device)
             for embedding in non_seed_embeddings:
                 temp = torch.cat((temp, cosine_similarity(seed_embeddings[i], embedding)))
-            logger.info(f"similarities for seed_embeddings {i}: {temp}")
+            logger.debug(f"similarities for seed_embeddings {i}: {temp}")
             similarities = similarities + [temp]
-        logger.info(f"Similarities: {similarities}")
+        logger.debug(f"Similarities: {similarities}")
         similarities = torch.sum(torch.stack(similarities), dim=0)
-        logger.info(f"Similarities: {similarities}")
-        logger.info(f"similarities type: {similarities.shape}")
+        logger.debug(f"Similarities: {similarities}")
+        logger.debug(f"similarities type: {similarities.shape}")
         # find top3 similar embeddings
         topk = 3 if len(non_seed_indices) >= 3 else len(non_seed_indices)
         topk_indices = torch.topk(similarities, topk).indices
-        logger.info(f"Top3 indices: {topk_indices}")
+        logger.debug(f"Top3 indices: {topk_indices}")
         hit = 0
         for i in range(0, len(topk_indices)):
             idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
@@ -99,15 +108,12 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         positive_indices = (labels == 1).nonzero()
         negative_indices = (labels == 0).nonzero()
         embeddings = logits.squeeze(1)
-        logger.info(f"Seed Indices: {seed_indices}")
-        logger.info(f"Positive Indices: {positive_indices}")
+        logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
+        
         # 生成所有可能的 (seed, positive) 组合对
         seed_positive_pairs = list(product(seed_indices, positive_indices))
-        logger.info(f"Seed Positive Pairs: {seed_positive_pairs}")
+        logger.debug(f"Seed Positive Pairs: {seed_positive_pairs}")
         # 提取组合对的嵌入
-        for pair in seed_positive_pairs:
-            logger.info(f"Seed Pair: {pair}")
-            logger.info(f"Embedding: {embeddings[pair[0]]}")
         seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_positive_pairs])
         positive_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_positive_pairs])
         # 定义 margin
@@ -119,6 +125,8 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         # 计算正样本对的 Contrastive Loss
         positive_loss = torch.mean(positive_labels * positive_distances.pow(2)) 
 
+        if len(negative_indices) == 0:
+            return positive_loss
         # 生成所有可能的 (seed, negative) 组合对
         seed_negative_pairs = list(product(seed_indices, negative_indices))
         # 提取组合对的嵌入
