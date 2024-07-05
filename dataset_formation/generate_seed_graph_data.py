@@ -1,11 +1,13 @@
-
-import xml.etree.ElementTree as ET
 import itertools
-from graphviz import Digraph
 import logging
-from tqdm import tqdm
 import click
 import os
+
+import xml.etree.ElementTree as ET
+import matplotlib.pyplot as plt
+
+from tqdm import tqdm
+from graphviz import Digraph
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('SEED')
@@ -171,6 +173,67 @@ def main(input_path, step):
         for i, seed in enumerate(seeds):
             logger.debug(f"Seed: {seed}")
             generate_expanded_graph_from_seed(expanded_model_path, seed, idx=i, steps=step)
+
+@click.command()
+@click.argument('input_path', type=click.Path(exists=True))
+def get_statistics(input_path):
+    context_models = os.listdir(input_path)
+    statistics = {
+        'positive_variables': [],
+        'variables': [],
+        'positive_functions': [],
+        'functions': [],
+        'positive_classes': [],
+        'classes': [],
+        'variable_percentage': [],
+    }
+    for context_model in tqdm(context_models):
+        logger.debug(f"Processing {context_model}")
+        # get the number of variables
+        if not os.path.exists(f"{input_path}/{context_model}/big_1_step_expanded_model.xml"):
+            continue
+        tree = ET.parse(f"{input_path}/{context_model}/big_1_step_expanded_model.xml")
+        root = tree.getroot()
+        vertices = root.findall(".//vertex")
+        num_nodes = len(vertices)
+        variables = 0
+        positive_variables = 0
+        functions = 0
+        positive_functions = 0
+        classes = 0
+        positive_classes = 0
+        for vertex in vertices:
+            if vertex.get('kind') == 'variable':
+                variables += 1
+                positive_variables += 1 if vertex.get('origin') == '1' else 0
+            elif vertex.get('kind') == 'function':
+                functions += 1
+                positive_functions += 1 if vertex.get('origin') == '1' else 0
+            elif vertex.get('kind') == 'class':
+                classes += 1
+                positive_classes += 1 if vertex.get('origin') == '1' else 0
+        statistics['positive_variables'].append(positive_variables)
+        statistics['variables'].append(variables)
+        statistics['positive_functions'].append(positive_functions)
+        statistics['functions'].append(functions)
+        statistics['positive_classes'].append(positive_classes)
+        statistics['classes'].append(classes)
+        if num_nodes == 0:
+            continue
+        statistics['variable_percentage'].append(variables/num_nodes)
+
+        
+        print(f"{context_model}: classes={positive_classes}/{classes} functions={positive_functions}/{functions} variables={positive_variables}/{variables} ")
+    print(f"positive variables = 0: {statistics['positive_variables'].count(0)}")
+    # count the number of variable_percentage > 0.5
+    num_variable_percentage = len([i for i in statistics['variable_percentage'] if i > 0.2])
+    print(f"variable_percentage > 0.2: {num_variable_percentage}")
+    # plot the statistics num
+    count_values = [statistics['positive_variables'].count(i) for i in range(0, max(statistics['positive_variables'])+1)]
+
+    # plt.bar(range(0, max(statistics['positive_variables'])+1), count_values)
+    plt.hist(statistics['variable_percentage'], bins=50, alpha=0.5, label='variables')
+    plt.show()
 
 if __name__ == '__main__':
     main()
