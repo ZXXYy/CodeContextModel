@@ -47,10 +47,15 @@ class RGCN(nn.Module):
 
     def forward(self, g, feat, etype):
         h = self.conv1(g, feat, etype)
-        h = F.relu(h)
+        h = F.relu(h) + feat  # 添加残差连接
+        h_prev = h  # 保存当前层的输出以用作下一层的残差连接
+
         h = self.conv2(g, h, etype)
-        h = F.relu(h)
+        h = F.relu(h) + h_prev  # 添加残差连接
+        h_prev = h  # 更新h_prev
+
         h = self.conv3(g, h, etype)
+        h = F.relu(h) + h_prev  # 添加残差连接
         # h = F.relu(h)
         # return self.mlp(h)
         return h

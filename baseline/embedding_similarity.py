@@ -19,7 +19,11 @@ logger = logging.getLogger(__name__)
 def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     batch_size = len(batch_num_nodes)
     start_idx = 0
-    total_hit = 0
+    total_hit = {
+        'top3_hit': 0,
+        'top4_hit': 0,
+        'top5_hit': 0,
+    }
     logger.debug(f"Batch num:{batch_num_nodes}")
     for k in range(batch_size):
         labels = batch_labels[start_idx : start_idx + batch_num_nodes[k]]
@@ -43,18 +47,21 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
         logger.debug(f"Similarities: {similarities}")
         logger.debug(f"similarities type: {similarities.shape}")
         # find top3 similar embeddings
-        topk = 3 if len(non_seed_indices) >= 3 else len(non_seed_indices)
-        topk_indices = torch.topk(similarities, topk).indices
-        logger.debug(f"Top3 indices: {topk_indices}")
-        hit = 0
-        for i in range(0, len(topk_indices)):
-            idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
-            if labels[idx] == 1:
-                hit = 1
-        total_hit += hit
+        for topk in range(3,6):
+            temp = topk
+            topk = topk if len(non_seed_indices) >= topk else len(non_seed_indices)
+            topk_indices = torch.topk(similarities, topk).indices
+            logger.debug(f"Top{topk} indices: {topk_indices}")
+            hit = 0
+            for i in range(0, len(topk_indices)):
+                idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
+                if labels[idx] == 1:
+                    hit = 1
+                    break
+            total_hit[f"top{temp}_hit"] += hit
         start_idx += batch_num_nodes[k]
 
-    return {'hit': total_hit}
+    return total_hit
 
 if __name__ == "__main__":
 
@@ -75,7 +82,11 @@ if __name__ == "__main__":
     data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', device=device, debug=args.debug)
     data_loader = DataLoader(data_builder, batch_size=args.batch_size, shuffle=True, collate_fn=dgl.batch)
     
-    hit_rate = {"hit": 0.0}
+    hit_rate = {
+        'top3_hit': 0,
+        'top4_hit': 0,
+        'top5_hit': 0,
+    }
 
     for i, batch_graphs in tqdm(enumerate(data_loader)):
         metrics = compute_metrics(batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())

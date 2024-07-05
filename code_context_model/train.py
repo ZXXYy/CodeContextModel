@@ -8,6 +8,7 @@ import torch
 import logging
 import dgl
 import wandb
+import atexit
 import numpy as np
 
 from tqdm import tqdm
@@ -24,6 +25,12 @@ logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(me
 logger = logging.getLogger(__name__)
 
 wandb.init(project="code-context-model")
+
+# handle the exit event
+def exit_handler():
+    # wandb finish 
+    wandb.finish()
+atexit.register(exit_handler)
 
 def set_seed(seed):
     random.seed(seed)
@@ -128,21 +135,22 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         embeddings = logits
         logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
         
-        # 生成所有可能的 (seed, positive) 组合对
+        # 生成所有可能的 (seed_index, positive_index) 组合对
         seed_positive_pairs = list(product(seed_indices, positive_indices))
         logger.debug(f"Seed Positive Pairs: {seed_positive_pairs}")
         # 提取组合对的嵌入
         seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_positive_pairs])
         positive_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_positive_pairs])
         # 定义 margin
-        margin = 1.0
+        neg_margin = 0.0
+        pos_margin = 1.0
         # 计算正样本对之间的欧氏距离
-        positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
-        # positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
+        # positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
+        positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
         # 构建正样本对标签（全1）
         positive_labels = torch.ones(positive_distances.size(), device=positive_distances.device)
         # 计算正样本对的 Contrastive Loss
-        positive_loss = torch.mean(positive_labels * positive_distances.pow(2)) 
+        positive_loss = torch.mean(positive_labels *  torch.clamp(pos_margin-positive_distances, min=0.0).pow(2)) 
 
         if len(negative_indices) == 0:
             return positive_loss
@@ -152,12 +160,12 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_negative_pairs])
         negative_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_negative_pairs])
         # 计算负样本对之间的欧氏距离
-        negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
-        # negative_distances = pairwise_cosine_similarity(seed_pair_embeddings, negative_pair_embeddings)
+        # negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
+        negative_distances = pairwise_cosine_similarity(seed_pair_embeddings, negative_pair_embeddings)
         # 构建负样本对标签（全0）
         negative_labels = torch.zeros(negative_distances.size(), device=negative_distances.device)
         # 计算负样本对的 Contrastive Loss
-        negative_loss = torch.mean((1 - negative_labels) * torch.clamp(margin - negative_distances, min=0.0).pow(2))
+        negative_loss = torch.mean((1 - negative_labels) * torch.clamp(negative_distances-neg_margin, min=0.0).pow(2))
 
         # 总的 Contrastive Loss
         total_loss += positive_loss + negative_loss
@@ -165,7 +173,7 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
 
     return total_loss # , non_seed_logits, non_seed_labels
 
-def train(model, train_loader, valid_loader, verbose=True, **kwargs):
+def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
     logger.info("======= Start training =======")
     lr = kwargs.get('lr', 0.01)
     num_epochs = kwargs.get('num_epochs', 50)
@@ -199,9 +207,11 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
         for i, batch_graphs in enumerate(train_loader):
             train_graph_num_cnt += len(batch_graphs.batch_num_nodes())
             # 打印形状以调试
-            # logger.info(f"Node features shape: {batch_graphs.ndata['feat'].shape}")
+            # logger.info(f"Node features shape: {batch_graphs.edata['label'].shape}")
+            # logger.info(f"Node features shape: {batch_graphs.edata['label'].squeeze(1).shape}")
+
             # logger.info(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
-            logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
+            logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
             # if epoch > 10:
             #     logger.info(f"Logits: {logits}")
             #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
@@ -224,7 +234,7 @@ def train(model, train_loader, valid_loader, verbose=True, **kwargs):
             eval_graph_num_cnt = 0
             for i, batch_graphs in enumerate(valid_loader):
                 eval_graph_num_cnt += len(batch_graphs.batch_num_nodes())
-                logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
+                logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
                 loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
                 eval_loss += loss.item()
                 metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
@@ -258,7 +268,7 @@ def test(model, test_loader, **kwargs):
     with torch.no_grad():
         test_hit_rate = {"hit": 0.0}
         for i, batch_graphs in enumerate(test_loader):
-            logits = model(batch_graphs, batch_graphs.ndata['feat'].squeeze(1), batch_graphs.edata['label'].squeeze(1))
+            logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
             # non_seed_indices = (batch_graphs.ndata['label'] != -1).nonzero()
             # # 根据non_seed_indices选出对应的logits和labels
             # non_seed_logits = logits.squeeze(1)[non_seed_indices]

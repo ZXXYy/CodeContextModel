@@ -68,6 +68,7 @@ class ExpandGraphDataset(DGLDataset):
                     node_embedding = node_embedding[0].tolist()
                 else:
                     node_embedding = list(df_embeddings[df_embeddings['id'] == node_id]['embedding'])
+                    node_embedding = node_embedding[0]
                 vertex_features.append(node_embedding)
                 if vertex.get('seed', '0') == '1':
                     vertex_labels.append(-1)
@@ -105,6 +106,7 @@ class ExpandGraphDataset(DGLDataset):
             g = dgl.graph(data=(src, dst)).to(self.device)
 
             # 设置节点特征
+            logger.debug(f"node_features: {node_features.shape}")
             g.ndata['feat'] = node_features.to(self.device)
             # 设置节点标签
             g.ndata['label'] = node_labels.to(self.device)
