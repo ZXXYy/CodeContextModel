@@ -29,7 +29,7 @@ class BgeEmbedding(TextEmbedding):
     def __init__(self):
         self.tokenizer = AutoTokenizer.from_pretrained('BAAI/bge-large-en-v1.5')
         self.model = AutoModel.from_pretrained('BAAI/bge-large-en-v1.5', revision="refs/pr/13")
-        self.device = torch.device("cuda:8" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         logger.info(f"BgeEmbedding initialized in {self.device}")
     
@@ -37,7 +37,7 @@ class BgeEmbedding(TextEmbedding):
         return "BgeEmbedding"
 
     def get_embedding(self, input_texts: list, batch_size: int = 32) -> torch.Tensor:
-        logger.info(f"Total input texts: {len(input_texts)}")
+        logger.info(f"Total number of input texts: {len(input_texts)}")
         
         # Function to process a single batch and get embeddings
         def process_batch(batch_texts):
@@ -61,9 +61,9 @@ class BgeEmbedding(TextEmbedding):
         # Concatenate all embeddings into a single tensor
         all_embeddings = torch.cat(all_embeddings, dim=0).to('cpu')
         
-        logger.info(f"All embeddings device: {all_embeddings.device}")
-        logger.info(f"All embeddings shape: {all_embeddings.shape}")
-        logger.info(f"Sentence embeddings: {all_embeddings}")
+        logger.debug(f"All embeddings device: {all_embeddings.device}")
+        logger.debug(f"All embeddings shape: {all_embeddings.shape}")
+        logger.debug(f"Sentence embeddings: {all_embeddings}")
         
         return all_embeddings.tolist()
 
@@ -120,24 +120,42 @@ def get_tokenizer_statistics(input_dir):
 def embedding_inference(input_dir, output_dir):
     model = BgeEmbedding()
     id_dirs = sorted(os.listdir(input_dir))
+    codes = []
+    logger.info("Start reading codes...")
     for id_dir in tqdm(id_dirs):
-        logger.info(f"{input_dir}, {id_dir}")
-        codes_path = os.path.join(input_dir, id_dir, "my_java_codes.tsv")
+        logger.debug(f"{input_dir}, {id_dir}")
+        codes_path = os.path.join(input_dir, id_dir, "my_java_codes_collapse.tsv")
         output_fn = os.path.join(output_dir, f'{id_dir}_{model}_embedding.pkl')
+        if not os.path.exists(codes_path):
+            logger.info(f"No file in {codes_path}")
+            continue
         if os.path.exists(output_fn):
             logger.info(f"Skip {output_fn}")
             continue
-        logger.info(f"processing {codes_path}")
         df_code = pd.read_csv(codes_path, sep='\t')
-
-        logger.info(f"df_code shape: {df_code.shape}")
+        codes.append({
+            'id_dir': id_dir,
+            'df_code': df_code
+        })
+        logger.debug(f"df_code shape: {df_code.shape}")
+        
+    logger.info(f"start inference...")
+    for i, code in tqdm(enumerate(codes), total=len(codes)):
+        df_code = code['df_code']
         nodes_text = df_code['code'].tolist()
-        logger.info(f"start inference...")
         embeddings = model.get_embedding(nodes_text)
-
         df_code.loc[:, 'embedding'] = embeddings   
         df_code = df_code.drop(columns=['code']) 
+        code['df_code'] = df_code
+        codes[i] = code
+
+    logger.info(f"write embeddings to file")
+    for i, code in tqdm(enumerate(codes), total=len(codes)):
+        id_dir = code['id_dir']
+        output_fn = os.path.join(output_dir, f'{id_dir}_{model}_embedding.pkl')
+        df_code = code['df_code']
         df_code.to_pickle(output_fn)
+        df_code.to_csv(output_fn.replace('.pkl', '.csv'), index=False)
 
 @click.command()
 @click.option('--input_dir', type=str, help='input directory')
