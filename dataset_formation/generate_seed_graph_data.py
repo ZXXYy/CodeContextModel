@@ -1,7 +1,9 @@
+import os
 import itertools
 import logging
-import click
-import os
+import random
+import argparse
+import shutil
 
 import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
@@ -9,6 +11,7 @@ import pandas as pd
 
 from tqdm import tqdm
 from graphviz import Digraph
+
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('SEED')
@@ -36,6 +39,12 @@ def display_graph(graph_path):
     dot.render(graph_path.split('.')[0], format='png', view=True)
 
 def subgraph2graph(expanded_model_path):
+    if not os.path.exists(expanded_model_path):
+        logger.error(f"{expanded_model_path} not exists")
+        return
+    # if os.path.exists(expanded_model_path.replace('new_', 'big_')):
+    #     logger.info(f"{expanded_model_path.replace('new_', 'big_')} already exists")
+    #     return
     tree = ET.parse(expanded_model_path)
     root = tree.getroot()
     graphs = root.findall(".//graph")
@@ -55,85 +64,10 @@ def subgraph2graph(expanded_model_path):
     out_path = expanded_model_path.replace('new_', 'big_')
     tree.write(out_path, encoding='utf-8', xml_declaration=False)
 
-def collaspe_variables(expanded_model_path, code_path, model_dir, outdir):
-    df_code = pd.read_csv(code_path, sep='\t')
-    tree = ET.parse(expanded_model_path)
-    root = tree.getroot()
-    # 1. 找到所有的class结点
-    vertices_class = root.findall(".//vertex[@kind='class']")
-    logger.info(f"Number of class: {len(vertices_class)}")
-    for i, vertex in enumerate(vertices_class):
-        class_id = vertex.get('id')
-        # 2. 对于每一个class结点，找到其所有的variable结点
-        class_edges = root.findall(f".//edge[@start='{class_id}']")
-        variable_codes = ""
-        variable_ids = []
-        variable_origin = False
-        logger.info(f"Number of class edges: {len(class_edges)}")
-        for edge in class_edges:
-            end_id = edge.get('end')
-            variable = root.find(f".//vertex[@id='{end_id}'][@kind='variable']")
-            if variable is None:
-                continue
-            logger.info(f"class declared variables: {variable}")
-            variable_id = f"{model_dir}_{variable.get('kind')}_{variable.get('ref_id')}"
-            variable_code = df_code[df_code['id'] == variable_id]['code'].values[0]
-            # 2.1 如果len(variable_code) < 100, 则将variable结点合并
-            if len(variable_code) < 100:
-                # 2.1.1 找到这些结点对应的代码片段，合并
-                variable_codes += variable_code + "\n"
-                variable_ids.append(variable.get('id'))
-                variable_origin = variable_origin or variable.get('origin') == '1'
-                pass
-            # 2.2 如果len(variable_code) >= 100, variable结点保存
-            else:
-                pass
-        new_variable_id = len(root.findall(".//vertex"))
-        new_variable = ET.Element("vertex", attrib={
-            "id": str(new_variable_id),
-            "kind": "variable",
-            "origin": "1" if variable_origin else "0",
-            "ref_id": f"collapsed_variable_{i}",
-        })
-        vertices = root.find('.//vertices')
-        vertices.append(new_variable)
-        df_code = pd.concat([df_code, pd.DataFrame({
-            'id': f"{model_dir}_{new_variable.get('kind')}_{new_variable.get('ref_id')}", 
-            'code': variable_codes}, index=[0])],ignore_index=True)
-        # 3. 获取删除结点的所有边，将这些边的start和end指向新的variable结点
-        for variable_id in variable_ids:
-            variable = root.find(f".//vertex[@id='{variable_id}']")
-            parent_variable = root.find(f".//vertices")
-            parent_variable.remove(variable)
-            # 删除边
-            def update_edges(edges, variable_id):
-                parent_edges = root.find(f".//edges")
-                for edge in edges:
-                    start_id = edge.get('start')
-                    end_id = edge.get('end')
-                    if start_id == variable_id:
-                        # 如果边已经存在，则不添加
-                        if root.find(f".//edge[@start='{new_variable_id}'][@end='{end_id}']") is None:
-                            edge.set('start', str(new_variable_id))
-                        else:
-                            parent_edges.remove(edge)
-                    if end_id == variable_id:
-                        if root.find(f".//edge[@start='{start_id}'][@end='{new_variable_id}']") is None:
-                            edge.set('end', str(new_variable_id))
-                        else:
-                            parent_edges.remove(edge)
-            start_edges = root.findall(f".//edge[@start='{variable_id}']")
-            end_edges = root.findall(f".//edge[@end='{variable_id}']")
-            update_edges(start_edges, variable_id)
-            update_edges(end_edges, variable_id)
-
-    # 5. 写入文件
-    tree.write(f"{outdir}/collaspe_vertex.xml", encoding='utf-8', xml_declaration=True)
-    df_code.to_csv(f"{outdir}/my_java_codes_collapse.tsv", sep='\t', index=False)
-            
-
-
 def generate_seed(expanded_model_path, step=1):
+    if not os.path.exists(expanded_model_path):
+        logger.error(f"{expanded_model_path} not exists")
+        return None, None
     tree = ET.parse(expanded_model_path)
     root = tree.getroot()
     vertex_ids = []
@@ -178,7 +112,10 @@ def form_expand_graph(new_nodes, new_edges, old_xml_graph):
     new_tree = ET.ElementTree(new_root)
     return new_tree
 
-def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, steps=1):
+def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, outdir, steps=1):
+    if not os.path.exists(expanded_model_path):
+        logger.error(f"{expanded_model_path} not exists")
+        return
     tree = ET.parse(expanded_model_path)
     root = tree.getroot()
     logger.debug(seeds)
@@ -227,15 +164,120 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, steps=1):
             new_edges.append(edge)
     
     # write new graph to file
-    prefix_output = os.path.join(os.path.dirname(expanded_model_path), "seed_expanded")
     logger.debug(f"new_nodes: {len(new_nodes)}, new_edges: {len(new_edges)}")
     new_tree = form_expand_graph(new_nodes, new_edges, root)
-    new_tree.write(f"{prefix_output}/{steps}_step_seeds_{idx}_expanded_model.xml", encoding='utf-8', xml_declaration=True)
+    new_tree.write(f"{outdir}/{steps}_step_seeds_{idx}_expanded_model.xml", encoding='utf-8', xml_declaration=True)
 
-@click.command()
-@click.argument('input_path', type=click.Path(exists=True))
-@click.option('--step', default=1, help='The number of steps to expand the seed graph')
-def main(input_path, step):
+def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
+    if not os.path.exists(expanded_model_path):
+        logger.error(f"{expanded_model_path} not exists")
+        return
+    if not os.path.exists(code_path):
+        logger.warning(f"{code_path} not exists")
+        return
+    df_code = pd.read_csv(code_path, sep='\t')
+    tree = ET.parse(expanded_model_path)
+    root = tree.getroot()
+    # 1. 找到所有的class结点
+    vertices_class = root.findall(".//vertex[@kind='class']")
+    logger.debug(f"Number of class: {len(vertices_class)}")
+    for i, vertex in enumerate(vertices_class):
+        class_id = vertex.get('id')
+        # 2. 对于每一个class结点，找到其所有的variable结点
+        class_edges = root.findall(f".//edge[@start='{class_id}']")
+        variable_codes = ""
+        variable_ids = []
+        variable_origin = False
+        logger.debug(f"Number of class edges: {len(class_edges)}")
+        for edge in class_edges:
+            end_id = edge.get('end')
+            variable = root.find(f".//vertex[@id='{end_id}'][@kind='variable']")
+            if variable is None:
+                continue
+            logger.debug(f"class declared variables: {variable}")
+            variable_id = f"{model_dir}_{variable.get('kind')}_{variable.get('ref_id')}"
+            variable_code = df_code[df_code['id'] == variable_id]['code'].values[0]
+            logger.debug(f'{code_path}:\n {variable_id}\n{variable_code}')
+            logger.debug('='*10)
+
+            # 2.1 如果len(variable_code) < 100, 则将variable结点合并
+            if len(variable_code) < 100:
+                # 2.1.1 找到这些结点对应的代码片段，合并
+                variable_codes += variable_code + "\n"
+                variable_ids.append(variable.get('id'))
+                variable_origin = variable_origin or variable.get('origin') == '1'
+                pass
+            # 2.2 如果len(variable_code) >= 100, variable结点保存
+            else:
+                pass
+        if len(variable_ids) == 0:
+            continue
+        new_variable_id = len(root.findall(".//vertex"))
+        new_variable = ET.Element("vertex", attrib={
+            "id": str(new_variable_id),
+            "kind": "variable",
+            "origin": "1" if variable_origin else "0",
+            "ref_id": f"{step}_step_collapsed_variable_{i}",
+        })
+        vertices = root.find('.//vertices')
+        vertices.append(new_variable)
+        code_id = f"{model_dir}_{new_variable.get('kind')}_{new_variable.get('ref_id')}", 
+        if df_code[df_code['id'] == code_id].empty:
+            df_code = pd.concat([df_code, pd.DataFrame({
+                'id': code_id, 
+                'code': variable_codes}, index=[0])],ignore_index=True)
+        # 3. 获取删除结点的所有边，将这些边的start和end指向新的variable结点
+        for variable_id in variable_ids:
+            variable = root.find(f".//vertex[@id='{variable_id}']")
+            parent_variable = root.find(f".//vertices")
+            parent_variable.remove(variable)
+            # 删除边
+            def update_edges(edges, variable_id):
+                parent_edges = root.find(f".//edges")
+                for edge in edges:
+                    start_id = edge.get('start')
+                    end_id = edge.get('end')
+                    logger.debug(f"edge: {start_id} -> {end_id}")
+                    def update_edge(start, end):
+                         # 如果边已经存在，则不添加
+                        if root.find(f".//edge[@start='{start}'][@end='{end}']") is None:
+                            edge.set('start', str(start))
+                            edge.set('end', str(end))
+                            logger.debug(f"new edge: {start} -> {end}")
+                            parent_edges.append(edge)
+                        parent_edges.remove(edge)
+                    if start_id == end_id:
+                        update_edge(new_variable_id,new_variable_id)
+                    elif start_id == variable_id:
+                        update_edge(new_variable_id,end_id)
+                    elif end_id == variable_id:
+                        update_edge(start_id,new_variable_id)
+            start_edges = root.findall(f".//edge[@start='{variable_id}']")
+            end_edges = root.findall(f".//edge[@end='{variable_id}']")
+            update_edges(start_edges, variable_id)
+            update_edges(end_edges, variable_id)
+
+    if not os.path.exists(f"{outdir}/{step}_step_collaspe"):
+        os.makedirs(f"{outdir}/{step}_step_collaspe")
+    # 5. 写入文件
+    tree.write(f"{outdir}/{step}_step_collaspe/collapse_{expanded_model_path.split('/')[-1]}", encoding='utf-8', xml_declaration=True)
+    df_code.to_csv(f"{outdir}/my_java_codes_collapse.tsv", sep='\t', index=False)
+            
+
+def generate_big_graphs(input_path, step=1):
+    """
+    将所有的子图合并成一个大图 new_1_step_expanded_model.xml -> big_1_step_expanded_model.xml
+    """
+    context_models = os.listdir(input_path)
+    for context_model in tqdm(context_models):
+        logger.debug(f"Processing {context_model}")
+        subgraph2graph(f"{input_path}/{context_model}/new_{step}_step_expanded_model.xml")
+
+def generate_seed_expanded_graphs(input_path, step=1):
+    """
+    根据seed生成扩展图，保存到seed_expanded文件夹下
+    big_x_step_expanded_model.xml -> x_step_seed_expanded/x_step_seeds_y_expanded_model.xml
+    """
     context_models = os.listdir(input_path)
     for context_model in tqdm(context_models):
         logger.debug(f"Processing {context_model}")
@@ -243,7 +285,7 @@ def main(input_path, step):
         if seeds is None:
             continue
         expanded_model_path = f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml"
-        prefix_output = os.path.join(os.path.dirname(expanded_model_path), "seed_expanded")
+        prefix_output = os.path.join(os.path.dirname(expanded_model_path), f"{step}_step_seed_expanded")
         if not os.path.exists(prefix_output):
             os.makedirs(prefix_output)
         # dir not empty, remove all files
@@ -251,10 +293,36 @@ def main(input_path, step):
             os.remove(os.path.join(prefix_output, file))
         for i, seed in enumerate(seeds):
             logger.debug(f"Seed: {seed}")
-            generate_expanded_graph_from_seed(expanded_model_path, seed, idx=i, steps=step)
+            generate_expanded_graph_from_seed(expanded_model_path, seed, idx=i, outdir=prefix_output, steps=step)
 
-@click.command()
-@click.argument('input_path', type=click.Path(exists=True))
+def generate_variable_collapsed_graphs(input_path, step=1):
+    """
+    合并变量结点
+    x_step_seed_expanded/x_step_seeds_y_expanded_model.xml -> x_step_collaspe/collaspe_x_step_seeds_y_expanded_model.xml
+    my_java_codes.tsv -> my_java_codes_collapse.tsv
+    """
+    context_models = os.listdir(input_path)
+    for context_model in tqdm(context_models):
+        logger.debug(f"Processing {context_model}")
+        expanded_model_dir = f"{input_path}/{context_model}/{step}_step_seed_expanded"
+        model_dir = context_model
+        outdir = f"{input_path}/{context_model}/"
+        code_path = f"{input_path}/{context_model}/my_java_codes.tsv"
+        if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse.tsv"):
+            code_path = f"{input_path}/{context_model}/my_java_codes_collapse.tsv"
+        if not os.path.exists(outdir):
+            os.makedirs(outdir)
+        # 从expanded_model_dir中随机选取一个文件
+        if not os.path.exists(expanded_model_dir):
+            logger.error(f"{expanded_model_dir} not exists")
+            continue
+        index = random.randint(0, len(os.listdir(expanded_model_dir)) - 1)
+        expanded_model_path = os.path.join(expanded_model_dir, os.listdir(expanded_model_dir)[index])
+        collaspe_variables(expanded_model_path, code_path=code_path, model_dir=model_dir, outdir=outdir, step=step)
+
+        # for expanded_model_path in os.listdir(expanded_model_dir):
+        #     expanded_model_path = os.path.join(expanded_model_dir, expanded_model_path)
+
 def get_statistics(input_path):
     context_models = os.listdir(input_path)
     statistics = {
@@ -282,12 +350,10 @@ def get_statistics(input_path):
         root = tree.getroot()
         vertices = root.findall(".//vertex")
         num_nodes = len(vertices)
-        variables = 0
-        positive_variables = 0
-        functions = 0
-        positive_functions = 0
-        classes = 0
-        positive_classes = 0
+        variables, positive_variables = 0, 0
+        functions, positive_functions = 0, 0
+        classes, positive_classes = 0, 0
+
         for vertex in vertices:
             if vertex.get('kind') == 'variable':
                 variables += 1
@@ -329,22 +395,55 @@ def get_statistics(input_path):
 
     plt.show()
 
-if __name__ == '__main__':
-    # main()
-    # get_statistics()
-    # expanded_model_path = "/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/60/big_1_step_expanded_model.xml"
-    # code_path = "/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/60/my_java_codes.tsv"
-    # model_dir = "60" 
-    # outdir = "/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/60"
-    # collaspe_variables(expanded_model_path, code_path=code_path, model_dir=model_dir, outdir=outdir)
-    # 使用下述代码转化子图为一张完整的图
-    # input_path = '/data0/xiaoyez/CodeContextModel/data/repo_first_3'
-    # context_models = os.listdir(input_path)
-    # for context_model in tqdm(context_models):
-    #     logger.debug(f"Processing {context_model}")
-    #     for step in range(1, 4):
-    #         subgraph2graph(f"{input_path}/{context_model}/new_{step}_step_expanded_model.xml")
+def clearup(input_path):
+    context_models = os.listdir(input_path)
+    for context_model in tqdm(context_models):
+        logger.debug(f"Processing {context_model}")            
+        for step in range(1, 4):
+            # remove big expanded graphs
+            expanded_model_dir = f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml"
+            if os.path.exists(expanded_model_dir):
+                os.remove(expanded_model_dir)
+            # remove seed expanded graphs
+            expanded_model_dir = f"{input_path}/{context_model}/{step}_step_seed_expanded"
+            if os.path.exists(expanded_model_dir):
+                shutil.rmtree(expanded_model_dir)
+        # remove collasped graphs
+        if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse.tsv"):
+            os.remove(f"{input_path}/{context_model}/my_java_codes_collapse.tsv")
+        if os.path.exists(f"{input_path}/{context_model}/seed_expanded"):
+            shutil.rmtree(f"{input_path}/{context_model}/seed_expanded")
+            
 
-    # 使用下述代码展示图     
-    # display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/1729/seed_expanded/1_step_seeds_0_expanded_model.xml')
-    display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/60/collaspe_vertex.xml')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input_dir', type=str, default='data', help='input directory')
+    parser.add_argument('--step', type=int, default=1, help='expand step')
+    parser.add_argument('--action', type=str, default='generate', help='action to perform: generate, statistics, display, clear')
+    args = parser.parse_args()
+
+
+    if args.action == 'generate':
+        # logger.info(f"=====start to generate big graphs from {args.input_dir}=====")
+        # generate_big_graphs(args.input_dir, args.step)
+        # logger.info(f"=====Big graphs generated successfully=====")
+        
+        # logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
+        # generate_seed_expanded_graphs(args.input_dir, args.step)
+        # logger.info(f"=====Seed expanded graphs generated successfully=====")
+
+        logger.info(f"=====start to generate collapsed variable graphs from {args.input_dir}=====")
+        generate_variable_collapsed_graphs(args.input_dir, args.step)
+        logger.info(f"=====Collasped variable graphs generated successfully=====")
+    elif args.action == 'statistics':
+        # 使用下述代码获取数据集中变量/函数/类的统计信息
+        # get_statistics('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data')
+        get_statistics(args.input_dir)
+    elif args.action == 'display':
+        # 使用下述代码展示图     
+        # display_graph('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn/1729/seed_expanded/1_step_seeds_0_expanded_model.xml')
+        display_graph(args.input_dir)
+    elif args.action == 'clear':
+        clearup(args.input_dir)
+    
+   
