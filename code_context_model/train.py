@@ -287,14 +287,14 @@ def read_xml_dataset(data_dir):
     dir_names = os.listdir(data_dir)
     
     for dir_name in dir_names:
-        dataset_dir = os.path.join(data_dir, dir_name, "seed_expanded")
+        dataset_dir = os.path.join(data_dir, dir_name, "1_step_collaspe")
         if not os.path.exists(dataset_dir):
             continue
         # for file_name in os.listdir(dataset_dir):
         #     if file_name.endswith(".xml"):
         #         result_xmls.append(os.path.join(dataset_dir, file_name))
         file_names = os.listdir(dataset_dir)
-        step_1_files = [f for f in file_names if f.startswith("1_step")]
+        step_1_files = [f for f in file_names if f.startswith("collapse_1_step")]
         if len(step_1_files) > 0:
             result_xmls.append(os.path.join(dataset_dir, step_1_files[random.randint(0, len(step_1_files) - 1)]))
     
