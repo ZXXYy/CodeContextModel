@@ -266,7 +266,11 @@ def test(model, test_loader, **kwargs):
 
     model.eval()
     with torch.no_grad():
-        test_hit_rate = {"hit": 0.0}
+        test_hit_rate = {
+            'top3_hit': 0,
+            'top4_hit': 0,
+            'top5_hit': 0,
+        }
         for i, batch_graphs in enumerate(test_loader):
             logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
             # non_seed_indices = (batch_graphs.ndata['label'] != -1).nonzero()
@@ -287,16 +291,18 @@ def read_xml_dataset(data_dir):
     dir_names = os.listdir(data_dir)
     
     for dir_name in dir_names:
-        dataset_dir = os.path.join(data_dir, dir_name, "1_step_collaspe")
-        if not os.path.exists(dataset_dir):
-            continue
+        # dataset_dir = os.path.join(data_dir, dir_name, "1_step_collaspe")
+        # if not os.path.exists(dataset_dir):
+        #     continue
         # for file_name in os.listdir(dataset_dir):
         #     if file_name.endswith(".xml"):
         #         result_xmls.append(os.path.join(dataset_dir, file_name))
-        file_names = os.listdir(dataset_dir)
-        step_1_files = [f for f in file_names if f.startswith("collapse_1_step")]
-        if len(step_1_files) > 0:
-            result_xmls.append(os.path.join(dataset_dir, step_1_files[random.randint(0, len(step_1_files) - 1)]))
+        # file_names = os.listdir(dataset_dir)
+        # step_1_files = [f for f in file_names if f.startswith("collapse_1_step")]
+        step_1_file = os.path.join(data_dir, dir_name, "collapse_1_step_seeds_expanded_model.xml")
+        logger.debug(f"Step 1 file: {step_1_file}")
+        if os.path.exists(step_1_file):
+            result_xmls.append(step_1_file)
     
     logger.info(f"Read total xml files: {len(result_xmls)}")
     return result_xmls

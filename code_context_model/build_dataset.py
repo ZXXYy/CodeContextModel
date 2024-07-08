@@ -45,7 +45,7 @@ class ExpandGraphDataset(DGLDataset):
         logger.info(f"building dataset from xml files len: {len(self.xml_files)}...")
         self.graphs = []
         for xml_file in tqdm(self.xml_files):
-            model_dir = xml_file.split('/')[-3]
+            model_dir = xml_file.split('/')[-2]
             embedding_path = os.path.join(self.embedding_dir, f"{model_dir}_{self.embedding_model}_embedding.pkl")
             # load embedding
             with open(embedding_path, 'rb') as f:
