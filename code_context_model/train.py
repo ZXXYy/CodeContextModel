@@ -24,8 +24,6 @@ from code_context_model.gnn import RGCN
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
 
-wandb.init(project="code-context-model")
-
 # handle the exit event
 def exit_handler():
     # wandb finish 
@@ -133,11 +131,10 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         positive_indices = (labels == 1).nonzero()
         negative_indices = (labels == 0).nonzero()
         embeddings = logits
-        logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
+        logger.info(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
         
         # 生成所有可能的 (seed_index, positive_index) 组合对
         seed_positive_pairs = list(product(seed_indices, positive_indices))
-        logger.debug(f"Seed Positive Pairs: {seed_positive_pairs}")
         # 提取组合对的嵌入
         seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_positive_pairs])
         positive_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_positive_pairs])
@@ -309,6 +306,8 @@ def read_xml_dataset(data_dir):
     
 
 if __name__ == "__main__":
+    wandb.init(project="code-context-model")
+
     parser = argparse.ArgumentParser()
     # train args
     parser.add_argument('--do_train', action='store_true', help='train the model')

@@ -35,8 +35,9 @@ def display_graph(graph_path):
     for edge in root.findall(".//edge"):
         label = edge.get('label')
         dot.edge(edge.get('start'), edge.get('end'), label=label, color='black')
-    # 保存并展示图
-    dot.render(graph_path.split('.')[0], format='png', view=True)
+    # 保存图
+    # dot.save(graph_path.split('.')[0] + '.dot')
+    dot.render(graph_path.split('.')[0], format='png', view=False)
 
 def subgraph2graph(expanded_model_path):
     if not os.path.exists(expanded_model_path):
@@ -190,6 +191,7 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
         variable_codes = ""
         variable_ids = []
         variable_origin = False
+        variable_seed = True
         logger.debug(f"Number of class edges: {len(class_edges)}")
         for edge in class_edges:
             end_id = edge.get('end')
@@ -208,16 +210,20 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
                 variable_codes += variable_code + "\n"
                 variable_ids.append(variable.get('id'))
                 variable_origin = variable_origin or variable.get('origin') == '1'
-                pass
+                if variable.get('origin') == '1' and variable.get('seed') == '0':
+                    variable_seed = False
             # 2.2 如果len(variable_code) >= 100, variable结点保存
             else:
                 pass
         if len(variable_ids) == 0:
             continue
+        if not variable_origin:
+            variable_origin = False
         new_variable = ET.Element("vertex", attrib={
             "id": str(new_variable_id),
             "kind": "variable",
             "origin": "1" if variable_origin else "0",
+            "seed": "1" if variable_seed else "0",
             "ref_id": f"{step}_step_collapsed_variable_{i}",
         })
         vertices = root.find('.//vertices')
@@ -428,13 +434,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.action == 'generate':
-        logger.info(f"=====start to generate big graphs from {args.input_dir}=====")
-        generate_big_graphs(args.input_dir, args.step)
-        logger.info(f"=====Big graphs generated successfully=====")
+        # logger.info(f"=====start to generate big graphs from {args.input_dir}=====")
+        # generate_big_graphs(args.input_dir, args.step)
+        # logger.info(f"=====Big graphs generated successfully=====")
         
-        logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
-        generate_seed_expanded_graphs(args.input_dir, args.step)
-        logger.info(f"=====Seed expanded graphs generated successfully=====")
+        # logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
+        # generate_seed_expanded_graphs(args.input_dir, args.step)
+        # logger.info(f"=====Seed expanded graphs generated successfully=====")
 
         logger.info(f"=====start to generate collapsed variable graphs from {args.input_dir}=====")
         generate_variable_collapsed_graphs(args.input_dir, args.step)
