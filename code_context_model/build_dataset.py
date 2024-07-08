@@ -106,14 +106,19 @@ class ExpandGraphDataset(DGLDataset):
             g = dgl.graph(data=(src, dst)).to(self.device)
 
             # 设置节点特征
-            logger.debug(f"node_features: {node_features.shape}")
-            g.ndata['feat'] = node_features.to(self.device)
-            # 设置节点标签
-            g.ndata['label'] = node_labels.to(self.device)
-            # 设置边特征
-            g.edata['label'] = edge_features.to(self.device)
+            try:
+                g.ndata['feat'] = node_features.to(self.device)
+                # 设置节点标签
+                g.ndata['label'] = node_labels.to(self.device)
+                # 设置边特征
+                g.edata['label'] = edge_features.to(self.device)
+                self.graphs.append(g)
+            except Exception as e:
+                logger.info(f"xml_files: {xml_file}")
+                logger.info(f"node_features: {node_features.shape}")
+                logger.info(f"nodes: {len(vertices)}")
 
-            self.graphs.append(g)
+            
 
     def __getitem__(self, idx):
         return self.graphs[idx]

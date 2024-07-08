@@ -42,6 +42,9 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
                 temp = torch.cat((temp, cosine_similarity(seed_embeddings[i], embedding)))
             logger.debug(f"similarities for seed_embeddings {i}: {temp}")
             similarities = similarities + [temp]
+        if len(similarities) == 0:
+            start_idx += batch_num_nodes[k]
+            continue
         logger.debug(f"Similarities: {similarities}")
         similarities = torch.sum(torch.stack(similarities), dim=0)
         logger.debug(f"Similarities: {similarities}")

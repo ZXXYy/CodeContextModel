@@ -92,13 +92,14 @@ def generate_seed(expanded_model_path, step=1):
 def form_expand_graph(new_nodes, new_edges, old_xml_graph):
     new_root = ET.Element("expanded_model")
     graph = old_xml_graph.find(".//graph")
+    max_nodes_id = len(old_xml_graph.findall(".//vertex"))-1
     new_graph = ET.Element("graph", attrib={
         "repo_name": graph.get('repo_name'),
         "repo_path": graph.get('repo_path')
     })
     # create graph meta info
     new_root.append(new_graph)
-    vertices = ET.Element("vertices", attrib={'total': str(len(new_nodes))})
+    vertices = ET.Element("vertices", attrib={'total': str(len(new_nodes)), 'max_id': str(max_nodes_id)})
     edges = ET.Element("edges", attrib={'total': str(len(new_edges))})
     new_graph.append(vertices)
     new_graph.append(edges)
@@ -112,7 +113,7 @@ def form_expand_graph(new_nodes, new_edges, old_xml_graph):
     new_tree = ET.ElementTree(new_root)
     return new_tree
 
-def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, outdir, steps=1):
+def generate_expanded_graph_from_seed(expanded_model_path, seeds, outdir, steps=1):
     if not os.path.exists(expanded_model_path):
         logger.error(f"{expanded_model_path} not exists")
         return
@@ -166,7 +167,7 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, idx, outdir, s
     # write new graph to file
     logger.debug(f"new_nodes: {len(new_nodes)}, new_edges: {len(new_edges)}")
     new_tree = form_expand_graph(new_nodes, new_edges, root)
-    new_tree.write(f"{outdir}/{steps}_step_seeds_{idx}_expanded_model.xml", encoding='utf-8', xml_declaration=True)
+    new_tree.write(f"{outdir}/{steps}_step_seeds_expanded_model.xml", encoding='utf-8', xml_declaration=True)
 
 def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
     if not os.path.exists(expanded_model_path):
@@ -179,6 +180,7 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
     tree = ET.parse(expanded_model_path)
     root = tree.getroot()
     # 1. 找到所有的class结点
+    new_variable_id = int(root.find(".//vertices").get('max_id')) + 1
     vertices_class = root.findall(".//vertex[@kind='class']")
     logger.debug(f"Number of class: {len(vertices_class)}")
     for i, vertex in enumerate(vertices_class):
@@ -212,7 +214,6 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
                 pass
         if len(variable_ids) == 0:
             continue
-        new_variable_id = len(root.findall(".//vertex"))
         new_variable = ET.Element("vertex", attrib={
             "id": str(new_variable_id),
             "kind": "variable",
@@ -256,11 +257,11 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
             end_edges = root.findall(f".//edge[@end='{variable_id}']")
             update_edges(start_edges, variable_id)
             update_edges(end_edges, variable_id)
-
+        new_variable_id += 1
     if not os.path.exists(f"{outdir}/{step}_step_collaspe"):
         os.makedirs(f"{outdir}/{step}_step_collaspe")
     # 5. 写入文件
-    tree.write(f"{outdir}/{step}_step_collaspe/collapse_{expanded_model_path.split('/')[-1]}", encoding='utf-8', xml_declaration=True)
+    tree.write(f"{outdir}/collapse_{expanded_model_path.split('/')[-1]}", encoding='utf-8', xml_declaration=True)
     df_code.to_csv(f"{outdir}/my_java_codes_collapse.tsv", sep='\t', index=False)
             
 
@@ -276,7 +277,7 @@ def generate_big_graphs(input_path, step=1):
 def generate_seed_expanded_graphs(input_path, step=1):
     """
     根据seed生成扩展图，保存到seed_expanded文件夹下
-    big_x_step_expanded_model.xml -> x_step_seed_expanded/x_step_seeds_y_expanded_model.xml
+    big_x_step_expanded_model.xml -> x_step_seeds_expanded_model.xml
     """
     context_models = os.listdir(input_path)
     for context_model in tqdm(context_models):
@@ -285,39 +286,34 @@ def generate_seed_expanded_graphs(input_path, step=1):
         if seeds is None:
             continue
         expanded_model_path = f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml"
-        prefix_output = os.path.join(os.path.dirname(expanded_model_path), f"{step}_step_seed_expanded")
-        if not os.path.exists(prefix_output):
-            os.makedirs(prefix_output)
-        # dir not empty, remove all files
-        for file in os.listdir(prefix_output):
-            os.remove(os.path.join(prefix_output, file))
-        for i, seed in enumerate(seeds):
-            logger.debug(f"Seed: {seed}")
-            generate_expanded_graph_from_seed(expanded_model_path, seed, idx=i, outdir=prefix_output, steps=step)
+        index = random.randint(0, len(seeds) - 1) 
+        seed = seeds[index]
+        logger.debug(f"Seed: {seed}")
+        generate_expanded_graph_from_seed(expanded_model_path, seed, outdir=f"{input_path}/{context_model}", steps=step)
+
+        # for i, seed in enumerate(seeds):
+        #     logger.debug(f"Seed: {seed}")
 
 def generate_variable_collapsed_graphs(input_path, step=1):
     """
     合并变量结点
-    x_step_seed_expanded/x_step_seeds_y_expanded_model.xml -> x_step_collaspe/collaspe_x_step_seeds_y_expanded_model.xml
+    x_step_seeds_expanded_model.xml -> collaspe_x_step_seeds_expanded_model.xml
     my_java_codes.tsv -> my_java_codes_collapse.tsv
     """
     context_models = os.listdir(input_path)
     for context_model in tqdm(context_models):
         logger.debug(f"Processing {context_model}")
-        expanded_model_dir = f"{input_path}/{context_model}/{step}_step_seed_expanded"
+        expanded_model_dir = f"{input_path}/{context_model}"
         model_dir = context_model
         outdir = f"{input_path}/{context_model}/"
         code_path = f"{input_path}/{context_model}/my_java_codes.tsv"
         if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse.tsv"):
             code_path = f"{input_path}/{context_model}/my_java_codes_collapse.tsv"
-        if not os.path.exists(outdir):
-            os.makedirs(outdir)
-        # 从expanded_model_dir中随机选取一个文件
-        if not os.path.exists(expanded_model_dir):
-            logger.error(f"{expanded_model_dir} not exists")
+
+        expanded_model_path = os.path.join(expanded_model_dir, f"{step}_step_seeds_expanded_model.xml")
+        if not os.path.exists(expanded_model_path):
+            logger.error(f"{expanded_model_path} not exists")
             continue
-        index = random.randint(0, len(os.listdir(expanded_model_dir)) - 1)
-        expanded_model_path = os.path.join(expanded_model_dir, os.listdir(expanded_model_dir)[index])
         collaspe_variables(expanded_model_path, code_path=code_path, model_dir=model_dir, outdir=outdir, step=step)
 
         # for expanded_model_path in os.listdir(expanded_model_dir):
@@ -408,6 +404,15 @@ def clearup(input_path):
             expanded_model_dir = f"{input_path}/{context_model}/{step}_step_seed_expanded"
             if os.path.exists(expanded_model_dir):
                 shutil.rmtree(expanded_model_dir)
+            collapse_model_dir = f"{input_path}/{context_model}/{step}_step_collaspe"
+            if os.path.exists(collapse_model_dir):
+                shutil.rmtree(collapse_model_dir)
+            seed_expanded_file = f"{input_path}/{context_model}/{step}_step_seeds_expanded_model.xml"
+            if os.path.exists(seed_expanded_file):
+                os.remove(seed_expanded_file)
+            collapse_file = f"{input_path}/{context_model}/collapse_{step}_step_seeds_expanded_model.xml"
+            if os.path.exists(collapse_file):
+                os.remove(collapse_file)
         # remove collasped graphs
         if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse.tsv"):
             os.remove(f"{input_path}/{context_model}/my_java_codes_collapse.tsv")
@@ -421,7 +426,6 @@ if __name__ == '__main__':
     parser.add_argument('--step', type=int, default=1, help='expand step')
     parser.add_argument('--action', type=str, default='generate', help='action to perform: generate, statistics, display, clear')
     args = parser.parse_args()
-
 
     if args.action == 'generate':
         logger.info(f"=====start to generate big graphs from {args.input_dir}=====")
