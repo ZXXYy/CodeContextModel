@@ -221,11 +221,11 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
             "kind": "variable",
             "origin": "1" if variable_origin else "0",
             "seed": "1" if variable_seed else "0",
-            "ref_id": f"{step}_step_collapsed_variable_{i}",
+            "ref_id": f"{step}_step_{expanded_model_path.split('/')[-1].split('_')[2]}_cc_collapsed_variable_{i}",
         })
         vertices = root.find('.//vertices')
         vertices.append(new_variable)
-        code_id = f"{model_dir}_{new_variable.get('kind')}_{new_variable.get('ref_id')}", 
+        code_id = f"{model_dir}_{new_variable.get('kind')}_{new_variable.get('ref_id')}"
         if df_code[df_code['id'] == code_id].empty:
             df_code = pd.concat([df_code, pd.DataFrame({
                 'id': code_id, 
@@ -264,7 +264,7 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
     if not os.path.exists(f"{outdir}/{step}_step_collaspe"):
         os.makedirs(f"{outdir}/{step}_step_collaspe")
     # 5. 写入文件
-    tree.write(f"{outdir}/collapse_{expanded_model_path.split('/')[-1]}", encoding='utf-8', xml_declaration=True)
+    tree.write(f"{outdir}/{step}_step_collaspe/collapse_{expanded_model_path.split('/')[-1]}", encoding='utf-8', xml_declaration=True)
     df_code.to_csv(f"{outdir}/my_java_codes_collapse.tsv", sep='\t', index=False)
             
 
@@ -308,7 +308,7 @@ def generate_seed_expanded_graphs(input_path, step=1):
 def generate_variable_collapsed_graphs(input_path, step=1):
     """
     合并变量结点
-    x_step_seeds_expanded_model.xml -> collaspe_x_step_seeds_expanded_model.xml
+    x_step_seeds_cc/x_step_y_cc_seeds_expanded_model.xml -> x_step_seeds_cc/collapsed_x_step_y_cc_seeds_expanded_model.xml
     my_java_codes.tsv -> my_java_codes_collapse.tsv
     """
     context_models = os.listdir(input_path)
@@ -318,14 +318,16 @@ def generate_variable_collapsed_graphs(input_path, step=1):
         model_dir = context_model
         outdir = f"{input_path}/{context_model}/"
         code_path = f"{input_path}/{context_model}/my_java_codes.tsv"
-        if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse.tsv"):
-            code_path = f"{input_path}/{context_model}/my_java_codes_collapse.tsv"
 
-        expanded_model_path = os.path.join(expanded_model_dir, f"{step}_step_seeds_expanded_model.xml")
-        if not os.path.exists(expanded_model_path):
-            logger.error(f"{expanded_model_path} not exists")
+        expanded_model_dir = os.path.join(expanded_model_dir, f"{step}_step_seeds_cc")
+        if not os.path.exists(expanded_model_dir):
+            logger.error(f"{expanded_model_dir} not exists")
             continue
-        collaspe_variables(expanded_model_path, code_path=code_path, model_dir=model_dir, outdir=outdir, step=step)
+        for expanded_model_path in os.listdir(expanded_model_dir):
+            if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse.tsv"):
+                code_path = f"{input_path}/{context_model}/my_java_codes_collapse.tsv"  
+            expanded_model_path = os.path.join(expanded_model_dir, expanded_model_path)
+            collaspe_variables(expanded_model_path, code_path=code_path, model_dir=model_dir, outdir=outdir, step=step)
 
         # for expanded_model_path in os.listdir(expanded_model_dir):
         #     expanded_model_path = os.path.join(expanded_model_dir, expanded_model_path)
@@ -429,6 +431,9 @@ def clearup(input_path):
             os.remove(f"{input_path}/{context_model}/my_java_codes_collapse.tsv")
         if os.path.exists(f"{input_path}/{context_model}/seed_expanded"):
             shutil.rmtree(f"{input_path}/{context_model}/seed_expanded")
+        for filename in os.listdir(f"{input_path}/{context_model}"):
+            if filename.startswith("collapse_") and filename.endswith(".xml"):
+                os.remove(f"{input_path}/{context_model}/{filename}")
             
 
 if __name__ == '__main__':
