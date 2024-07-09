@@ -65,12 +65,12 @@ def subgraph2graph(expanded_model_path):
     out_path = expanded_model_path.replace('new_', 'big_')
     tree.write(out_path, encoding='utf-8', xml_declaration=False)
 
-def generate_seed(expanded_model_path, step=1):
-    if not os.path.exists(expanded_model_path):
-        logger.error(f"{expanded_model_path} not exists")
-        return None, None
-    tree = ET.parse(expanded_model_path)
-    root = tree.getroot()
+def generate_seed(root, expanded_model_path, step=1):
+    # if not os.path.exists(expanded_model_path):
+    #     logger.error(f"{expanded_model_path} not exists")
+    #     return None, None
+    # tree = ET.parse(expanded_model_path)
+    # root = tree.getroot()
     vertex_ids = []
     # get vertex id
     for vertex in root.findall(".//vertex"):
@@ -91,8 +91,8 @@ def generate_seed(expanded_model_path, step=1):
     return seeds, filtered_vertex_ids
 
 def form_expand_graph(new_nodes, new_edges, old_xml_graph):
-    new_root = ET.Element("expanded_model")
-    graph = old_xml_graph.find(".//graph")
+    new_root = ET.Element("expanded_model_connected_component")
+    graph = old_xml_graph
     max_nodes_id = len(old_xml_graph.findall(".//vertex"))-1
     new_graph = ET.Element("graph", attrib={
         "repo_name": graph.get('repo_name'),
@@ -114,12 +114,7 @@ def form_expand_graph(new_nodes, new_edges, old_xml_graph):
     new_tree = ET.ElementTree(new_root)
     return new_tree
 
-def generate_expanded_graph_from_seed(expanded_model_path, seeds, outdir, steps=1):
-    if not os.path.exists(expanded_model_path):
-        logger.error(f"{expanded_model_path} not exists")
-        return
-    tree = ET.parse(expanded_model_path)
-    root = tree.getroot()
+def generate_expanded_graph_from_seed(root, cc_id, seeds, outdir, steps=1):
     logger.debug(seeds)
     new_edges = []
     new_nodes = []
@@ -168,7 +163,9 @@ def generate_expanded_graph_from_seed(expanded_model_path, seeds, outdir, steps=
     # write new graph to file
     logger.debug(f"new_nodes: {len(new_nodes)}, new_edges: {len(new_edges)}")
     new_tree = form_expand_graph(new_nodes, new_edges, root)
-    new_tree.write(f"{outdir}/{steps}_step_seeds_expanded_model.xml", encoding='utf-8', xml_declaration=True)
+    if not os.path.exists(f"{outdir}/{steps}_step_seeds_cc"):
+        os.makedirs(f"{outdir}/{steps}_step_seeds_cc")
+    new_tree.write(f"{outdir}/{steps}_step_seeds_cc/{steps}_step_{cc_id}_cc_seeds_expanded_model.xml", encoding='utf-8', xml_declaration=True)
 
 def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
     if not os.path.exists(expanded_model_path):
@@ -283,19 +280,27 @@ def generate_big_graphs(input_path, step=1):
 def generate_seed_expanded_graphs(input_path, step=1):
     """
     根据seed生成扩展图，保存到seed_expanded文件夹下
-    big_x_step_expanded_model.xml -> x_step_seeds_expanded_model.xml
+    new_x_step_expanded_model.xml -> x_step_seeds_expanded_model.xml
     """
     context_models = os.listdir(input_path)
     for context_model in tqdm(context_models):
         logger.debug(f"Processing {context_model}")
-        seeds, filtered_vertex_ids = generate_seed(f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml", step)
-        if seeds is None:
+        context_model_path = f"{input_path}/{context_model}/new_{step}_step_expanded_model.xml"
+        if not os.path.exists(context_model_path):
+            logger.error(f"{context_model_path} not exists")
             continue
-        expanded_model_path = f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml"
-        index = random.randint(0, len(seeds) - 1) 
-        seed = seeds[index]
-        logger.debug(f"Seed: {seed}")
-        generate_expanded_graph_from_seed(expanded_model_path, seed, outdir=f"{input_path}/{context_model}", steps=step)
+        tree = ET.parse(context_model_path)
+        root = tree.getroot()
+        graphs = root.findall(".//graph")
+        for cc_id, graph in enumerate(graphs):
+            seeds, filtered_vertex_ids = generate_seed(graph, context_model_path, step)
+            if seeds is None:
+                continue
+            
+            index = random.randint(0, len(seeds) - 1) 
+            seed = seeds[index]
+            logger.debug(f"Seed: {seed}")
+            generate_expanded_graph_from_seed(graph, cc_id, seed, outdir=f"{input_path}/{context_model}", steps=step)
 
         # for i, seed in enumerate(seeds):
         #     logger.debug(f"Seed: {seed}")

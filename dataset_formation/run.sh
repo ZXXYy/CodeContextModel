@@ -1,4 +1,4 @@
 python dataset_formation/generate_seed_graph_data.py \
---input_dir /data0/xiaoyez/CodeContextModel/data/repo_first_3 \
+--input_dir /Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data/mylyn \
 --action generate \
 --step 1
