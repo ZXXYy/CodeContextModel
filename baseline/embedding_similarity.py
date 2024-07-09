@@ -9,7 +9,7 @@ import logging
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from code_context_model.train import read_xml_dataset, cosine_similarity
+from code_context_model.train import read_xml_dataset, cosine_similarity, set_seed
 from code_context_model.build_dataset import ExpandGraphDataset, split_dataset
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
@@ -79,11 +79,16 @@ if __name__ == "__main__":
 
     global device
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
-
+    set_seed(42)
     # 加载数据集
     xml_files = read_xml_dataset(args.input_dir)
     data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', device=device, debug=args.debug)
-    data_loader = DataLoader(data_builder, batch_size=args.batch_size, shuffle=True, collate_fn=dgl.batch)
+    # 切分数据集
+    train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
+    # 使用 DataLoader 加载子集
+    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
+    valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
     
     hit_rate = {
         'top3_hit': 0,
@@ -91,10 +96,10 @@ if __name__ == "__main__":
         'top5_hit': 0,
     }
 
-    for i, batch_graphs in tqdm(enumerate(data_loader)):
+    for i, batch_graphs in tqdm(enumerate(test_loader)):
         metrics = compute_metrics(batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
         # logger.info(f"Test Batch {i}: Metrics {metrics}")
         hit_rate = {k: hit_rate[k] + metrics[k] for k in metrics}
         
-    hit_rate = {k: v / len(data_loader) for k, v in hit_rate.items()}
+    hit_rate = {k: v / len(test_loader) for k, v in hit_rate.items()}
     logger.info(f"Test finished, Test Metrics {hit_rate}")
