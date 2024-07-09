@@ -69,16 +69,18 @@ def euclidean_distance(x1, x2):
 def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     batch_size = len(batch_num_nodes)
     start_idx = 0
-    total_hit = {
-        'top3_hit': 0,
-        'top4_hit': 0,
-        'top5_hit': 0,
-    }
+    total_hit = {}
+    for i in range(1, 6):
+        total_hit[f'top{i}_hit'] = 0
+        total_hit[f'top{i}_precision'] = 0
+        total_hit[f'top{i}_recall'] = 0
+
     logger.debug(f"Batch num:{batch_num_nodes}")
     for k in range(batch_size):
         labels = batch_labels[start_idx : start_idx + batch_num_nodes[k]]
         logits = batch_logits[start_idx : start_idx + batch_num_nodes[k]]
         seed_indices = (labels == -1).nonzero()
+        positive_indices = (labels == 1).nonzero()
         seed_embeddings = logits[seed_indices]
         non_seed_indices = (labels != -1).nonzero()
         non_seed_embeddings = logits[non_seed_indices]
@@ -97,7 +99,7 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
         logger.debug(f"Similarities: {similarities}")
         logger.debug(f"similarities type: {similarities.shape}")
         # find top3 similar embeddings
-        for topk in range(3,6):
+        for topk in range(1,6):
             temp = topk
             topk = topk if len(non_seed_indices) >= topk else len(non_seed_indices)
             topk_indices = torch.topk(similarities, topk).indices
@@ -106,9 +108,11 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
             for i in range(0, len(topk_indices)):
                 idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
                 if labels[idx] == 1:
-                    hit = 1
+                    hit += 1
                     break
-            total_hit[f"top{temp}_hit"] += hit
+            total_hit[f"top{temp}_precision"] += (hit+len(seed_indices)) / (topk+len(seed_indices))
+            total_hit[f"top{temp}_recall"] += (hit+len(seed_indices)) / (len(seed_indices)+len(positive_indices))
+            total_hit[f"top{temp}_hit"] += 1 if hit > 0 else 0
         start_idx += batch_num_nodes[k]
 
     return total_hit
@@ -131,7 +135,7 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         positive_indices = (labels == 1).nonzero()
         negative_indices = (labels == 0).nonzero()
         embeddings = logits
-        logger.info(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
+        logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
         
         # 生成所有可能的 (seed_index, positive_index) 组合对
         seed_positive_pairs = list(product(seed_indices, positive_indices))
@@ -190,16 +194,16 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
         train_graph_num_cnt = 0
         # train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
         # eval_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
-        train_hit_rate = {
-            'top3_hit': 0,
-            'top4_hit': 0,
-            'top5_hit': 0,
-        }
-        eval_hit_rate = {
-            'top3_hit': 0,
-            'top4_hit': 0,
-            'top5_hit': 0,
-        }
+        train_hit_rate = {}
+        eval_hit_rate = {}
+        for i in range(1, 6):
+            train_hit_rate[f'top{i}_hit'] = 0
+            train_hit_rate[f'top{i}_precision'] = 0
+            train_hit_rate[f'top{i}_recall'] = 0
+            eval_hit_rate[f'top{i}_hit'] = 0
+            eval_hit_rate[f'top{i}_precision'] = 0
+            eval_hit_rate[f'top{i}_recall'] = 0
+        
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
             train_graph_num_cnt += len(batch_graphs.batch_num_nodes())
@@ -208,6 +212,10 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             # logger.info(f"Node features shape: {batch_graphs.edata['label'].squeeze(1).shape}")
 
             # logger.info(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
+            batch_graphs = batch_graphs.to(device)
+            batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
+            batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
+            batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
             logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
             # if epoch > 10:
             #     logger.info(f"Logits: {logits}")
@@ -230,6 +238,10 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
         with torch.no_grad():
             eval_graph_num_cnt = 0
             for i, batch_graphs in enumerate(valid_loader):
+                batch_graphs = batch_graphs.to(device)
+                batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
+                batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
+                batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
                 eval_graph_num_cnt += len(batch_graphs.batch_num_nodes())
                 logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
                 loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
@@ -263,12 +275,16 @@ def test(model, test_loader, **kwargs):
 
     model.eval()
     with torch.no_grad():
-        test_hit_rate = {
-            'top3_hit': 0,
-            'top4_hit': 0,
-            'top5_hit': 0,
-        }
+        test_hit_rate = {}
+        for i in range(1, 6):
+            test_hit_rate[f'top{i}_hit'] = 0
+            test_hit_rate[f'top{i}_precision'] = 0
+            test_hit_rate[f'top{i}_recall'] = 0
         for i, batch_graphs in enumerate(test_loader):
+            batch_graphs = batch_graphs.to(device)
+            batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
+            batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
+            batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
             logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
             # non_seed_indices = (batch_graphs.ndata['label'] != -1).nonzero()
             # # 根据non_seed_indices选出对应的logits和labels
@@ -282,27 +298,6 @@ def test(model, test_loader, **kwargs):
         logger.info(f"Test finished, Test Metrics {test_hit_rate}")
     
 
-
-def read_xml_dataset(data_dir):
-    result_xmls = []
-    dir_names = os.listdir(data_dir)
-    
-    for dir_name in dir_names:
-        # dataset_dir = os.path.join(data_dir, dir_name, "1_step_collaspe")
-        # if not os.path.exists(dataset_dir):
-        #     continue
-        # for file_name in os.listdir(dataset_dir):
-        #     if file_name.endswith(".xml"):
-        #         result_xmls.append(os.path.join(dataset_dir, file_name))
-        # file_names = os.listdir(dataset_dir)
-        # step_1_files = [f for f in file_names if f.startswith("collapse_1_step")]
-        step_1_file = os.path.join(data_dir, dir_name, "collapse_1_step_seeds_expanded_model.xml")
-        logger.debug(f"Step 1 file: {step_1_file}")
-        if os.path.exists(step_1_file):
-            result_xmls.append(step_1_file)
-    
-    logger.info(f"Read total xml files: {len(result_xmls)}")
-    return result_xmls
     
 
 if __name__ == "__main__":
@@ -355,14 +350,23 @@ if __name__ == "__main__":
     # 设置随机种子
     set_seed(args.seed)
     # 加载数据集
-    xml_files = read_xml_dataset(args.input_dir)
-    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', device=device, debug=args.debug)
-    # 切分数据集
-    train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
+    # xml_files = read_xml_dataset(args.input_dir)
+    # data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', device=device, debug=args.debug)
+    # # 切分数据集
+    # train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
+    train_dataset = torch.load(os.path.join(args.input_dir, 'train_dataset.pt'))
+    valid_dataset = torch.load(os.path.join(args.input_dir, 'valid_dataset.pt'))
+    test_dataset = torch.load(os.path.join(args.input_dir, 'test_dataset.pt'))
+    if args.debug:
+        train_dataset = train_dataset[:64]
+        valid_dataset = valid_dataset[:16]
+        test_dataset = test_dataset[:16]
+
     # 使用 DataLoader 加载子集
     train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
     valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
     test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
+    logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
 
     # # 定义模型
     model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)

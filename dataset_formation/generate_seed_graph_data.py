@@ -448,9 +448,9 @@ if __name__ == '__main__':
         # generate_big_graphs(args.input_dir, args.step)
         # logger.info(f"=====Big graphs generated successfully=====")
         
-        # logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
-        # generate_seed_expanded_graphs(args.input_dir, args.step)
-        # logger.info(f"=====Seed expanded graphs generated successfully=====")
+        logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
+        generate_seed_expanded_graphs(args.input_dir, args.step)
+        logger.info(f"=====Seed expanded graphs generated successfully=====")
 
         logger.info(f"=====start to generate collapsed variable graphs from {args.input_dir}=====")
         generate_variable_collapsed_graphs(args.input_dir, args.step)

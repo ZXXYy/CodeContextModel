@@ -1,18 +1,19 @@
 # code_context_model/run.sh
 python code_context_model/train.py \
 --do_train \
---device 1 \
+--device 3 \
 --train_batch_size 32 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
---input_dir "/data0/xiaoyez/CodeContextModel/data/repo_first_3" \
+--input_dir "/data0/xiaoyez/CodeContextModel/collapsed_dataset" \
 --embedding_dir "/data0/xiaoyez/CodeContextModel/bge_embedding_results2" \
 --output_dir "/data0/xiaoyez/CodeContextModel/model_output" \
 --num_epochs 50 \
---lr 1e-5 \
+--lr 1e-6 \
 --threshold 0.5 \
 --seed 42 \
---do_test 
+--do_test \
+--debug
 
 # debug
 # python code_context_model/train.py \

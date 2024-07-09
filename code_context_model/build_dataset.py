@@ -5,11 +5,13 @@ import os
 import shutil
 import random
 import logging
+import argparse
+
 import pandas as pd
 import numpy as np
+import xml.etree.ElementTree as ET
 
 from dgl.data import DGLDataset
-import xml.etree.ElementTree as ET
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Subset
@@ -32,11 +34,10 @@ edge_label = {
 }
 
 class ExpandGraphDataset(DGLDataset):
-    def __init__(self, xml_files, embedding_dir, embedding_model, device, debug=False):
+    def __init__(self, xml_files, embedding_dir, embedding_model, debug=False):
         
         self.xml_files = xml_files[:64] if debug else xml_files
         self.embedding_dir = embedding_dir
-        self.device = device
         self.embedding_model = embedding_model
 
         super().__init__(name='expand_graph_dataset')
@@ -45,7 +46,7 @@ class ExpandGraphDataset(DGLDataset):
         logger.info(f"building dataset from xml files len: {len(self.xml_files)}...")
         self.graphs = []
         for xml_file in tqdm(self.xml_files):
-            model_dir = xml_file.split('/')[-2]
+            model_dir = xml_file.split('/')[-3]
             embedding_path = os.path.join(self.embedding_dir, f"{model_dir}_{self.embedding_model}_embedding.pkl")
             # load embedding
             with open(embedding_path, 'rb') as f:
@@ -103,15 +104,15 @@ class ExpandGraphDataset(DGLDataset):
 
             # 构建DGL图
             src, dst = zip(*edge_list)
-            g = dgl.graph(data=(src, dst)).to(self.device)
+            g = dgl.graph(data=(src, dst))
 
             # 设置节点特征
             try:
-                g.ndata['feat'] = node_features.to(self.device)
+                g.ndata['feat'] = node_features
                 # 设置节点标签
-                g.ndata['label'] = node_labels.to(self.device)
+                g.ndata['label'] = node_labels
                 # 设置边特征
-                g.edata['label'] = edge_features.to(self.device)
+                g.edata['label'] = edge_features
                 self.graphs.append(g)
             except Exception as e:
                 logger.info(f"xml_files: {xml_file}")
@@ -121,7 +122,12 @@ class ExpandGraphDataset(DGLDataset):
             
 
     def __getitem__(self, idx):
-        return self.graphs[idx]
+        if isinstance(idx, list):
+            return [self.graphs[i] for i in idx]
+        elif isinstance(idx, np.ndarray):
+            return [self.graphs[i] for i in idx.tolist()]
+        else:
+            return self.graphs[idx]
 
     def __len__(self):
         return len(self.graphs)
@@ -141,30 +147,59 @@ def split_dataset(dataset, train_ratio=0.8, valid_ratio=0.1):
 
     return train_dataset, valid_dataset, test_dataset
 
+def read_xml_dataset(data_dir):
+    result_xmls = []
+    dir_names = os.listdir(data_dir)
+    
+    for dir_name in dir_names:
+        # dataset_dir = os.path.join(data_dir, dir_name, "1_step_collaspe")
+        # if not os.path.exists(dataset_dir):
+        #     continue
+        # for file_name in os.listdir(dataset_dir):
+        #     if file_name.endswith(".xml"):
+        #         result_xmls.append(os.path.join(dataset_dir, file_name))
+        # file_names = os.listdir(dataset_dir)
+        # step_1_files = [f for f in file_names if f.startswith("collapse_1_step")]
+        step_1_dir = os.path.join(data_dir, dir_name, "1_step_seeds_cc")
+        if not os.path.exists(step_1_dir):
+            continue
+        for step_1_file in os.listdir(step_1_dir):
+            logger.debug(f"Step 1 file: {step_1_file}")
+            if os.path.exists(os.path.join(step_1_dir, step_1_file)):
+                result_xmls.append(os.path.join(step_1_dir, step_1_file))
+    
+    logger.info(f"Read total xml files: {len(result_xmls)}")
+    return result_xmls
 
 if __name__ == '__main__':
-    xml_dir = '/data0/xiaoyez/CodeContextModel/data/repo_first_3/60/seed_expanded'
-    xml_files = [os.path.join(xml_dir, f) for f in os.listdir(xml_dir) if f.endswith('.xml')]
-    # xml_files = ['data/mylyn/60/seed_expanded/1_step_seeds_3_expanded_model.xml']
-    print(xml_files)
-    data_builder = ExpandGraphDataset(xml_files, "/data0/xiaoyez/CodeContextModel/codebert_embedding_results", 'codebert', torch.device('cpu'), debug=True)
-    # 切分数据集
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--input_dir', type=str, default='data', help='input directory')
+    parser.add_argument('--embedding_dir', type=str, default='data', help='embedding directory')
+    parser.add_argument('--output_dir', type=str, default='dataset', help='dataset output directory')
+    parser.add_argument('--debug', action='store_true', help='debug mode')
+    
+    args = parser.parse_args()
+
+    xml_files = read_xml_dataset(args.input_dir)
+    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', debug=args.debug)
     train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
-    # 使用 DataLoader 加载子集
-    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
-    valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
 
     logger.info(f"train dataset: {len(train_dataset)}")
-    for batch_graphs in train_loader:
-        print(batch_graphs)
-    logger.info(f"train dataset: {len(valid_dataset)}")
-    for batch_graphs in valid_loader:
-        print(batch_graphs)
-    logger.info(f"train dataset: {len(test_dataset)}")
-    for batch_graphs in test_loader:
-        print(batch_graphs)
+    logger.info(f"valid dataset: {len(valid_dataset)}")
+    logger.info(f"test dataset: {len(test_dataset)}")
 
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    # write the dataset to disk
+    torch.save(train_dataset, os.path.join(args.output_dir, 'train_dataset.pt'))
+    torch.save(valid_dataset, os.path.join(args.output_dir, 'valid_dataset.pt'))
+    torch.save(test_dataset,  os.path.join(args.output_dir, 'test_dataset.pt'))
+
+    # 使用 DataLoader 加载子集
+    # train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
+    # valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)
+    # test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True, collate_fn=dgl.batch)    
     # file_path = '/data2/shunliu/pythonfile/code_context_model_prediction/params_validation/git_repo_code/my_mylyn/repo_first_3/1005/1_codebert_embedding.pkl'
     # df_embeddings = pd.read_pickle(file_path)
     # print(df_embeddings)
