@@ -223,9 +223,9 @@ def pattern_matching(test_dir, pattern_dir, step: int):
     logger.info(f"Pattern Matching Test finished, Test Metrics {test_hit_rate}")
 
 def compute_metrics(confidence, G1):
-    # filter out seed nodes
-    confidence = list(filter(lambda x: G1.nodes.get(x[0])['seed'] == 0, confidence)) 
     confidence = sorted(confidence.items(), key=lambda d: d[1], reverse=True)  # [(3, 1.0), (17, 0.5), (14, 0.5)]
+    # filter out seed nodes
+    confidence = list(filter(lambda x: G1.nodes.get(x[0])['seed'] == 0, confidence))  
 
     total_hit = {
         'top3_hit': 0,
