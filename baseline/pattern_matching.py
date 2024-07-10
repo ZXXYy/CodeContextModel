@@ -18,8 +18,7 @@ def build_gspan_graph(input_dir, output_path):
     # 读取code context model
     model_dirs = json.loads(open(f'{input_dir}/train_index.json').read())
     logger.info(f"train sets len: {len(model_dirs)}")
-    all_nodes = []
-    all_edges = []
+    all_nodes, all_edges = [], []
     for model_dir in model_dirs:
         model_file = os.path.join(model_dir, 'code_context_model.xml')
         # 如果不存在模型，跳过处理
@@ -28,13 +27,13 @@ def build_gspan_graph(input_dir, output_path):
         # 读取code context model,以及doxygen的结果
         tree = ET.parse(model_file)  # 拿到xml树
         graphs = tree.getroot().findall("graph")
-        # f.write(f't # {graph_index}\n')
         curr_index = 0
-        nodes = []
-        edges = []
+        nodes, edges = [], []
+        # form subgraphs in the code context model to a big graph in gspan format 
         for graph in graphs:
             vertex_list = graph.find('vertices').findall('vertex')
             vs = []
+            # handle vertex
             for vertex in vertex_list:
                 stereotype, _id = vertex.get('stereotype'), int(vertex.get('id'))
                 # 去除 notfound
@@ -44,6 +43,7 @@ def build_gspan_graph(input_dir, output_path):
                 vertex_text = f'v {v[0] + curr_index} {v[1]}\n'
                 nodes.append(vertex_text)
             
+            # handle edges,
             edge_list = graph.find('edges').findall('edge')
             for edge in edge_list:
                 start, end, label = int(edge.get('start')), int(edge.get('end')), edge.get('label')
@@ -51,10 +51,13 @@ def build_gspan_graph(input_dir, output_path):
                 if start in keys and end in keys:
                     edge_text = f'e {start + curr_index} {end + curr_index} {label}\n'
                     edges.append(edge_text)
+
             curr_index += len(vertex_list)
+            
         all_nodes.append(nodes)
         all_edges.append(edges)
 
+    # write context model in gspan format to file 
     with open(output_path, 'w') as f:
         for i in range(len(all_nodes)):
             f.write(f't # {i}\n')
