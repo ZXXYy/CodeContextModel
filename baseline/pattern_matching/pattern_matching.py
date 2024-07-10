@@ -124,7 +124,7 @@ def get_graph(graphs: list[ET.Element], step: int):
         # 转化为图结构
         remove_nodes = []
         for node in vertex_list:
-            g.add_node(int(node.get('id')), label=node.get('stereotype'), origin=node.get('origin', 0), seed=node.get('seed', 0),
+            g.add_node(int(node.get('id')), label=node.get('stereotype'), origin=int(node.get('origin', 0)), seed=int(node.get('seed', 0)),
                        G1=node.get('G1'))
             if node.get('stereotype') == 'NOTFOUND':
                 remove_nodes.append(int(node.get('id')))
@@ -166,6 +166,10 @@ def node_match(node1, node2):
 def edge_match(edge1, edge2):
     return edge1['label'] == edge2['label']
 
+def graph_matc_task():
+    pass
+
+
 def pattern_matching(test_dir, pattern_dir, step: int):
     G1s = load_tests(test_dir, step)
     G2s = load_patterns(pattern_dir)
@@ -176,7 +180,8 @@ def pattern_matching(test_dir, pattern_dir, step: int):
         'top4_hit': 0,
         'top5_hit': 0,
     }
-    for G1 in tqdm(G1s):
+
+    for G1_index, G1 in tqdm(enumerate(G1s)):
         logger.info(f'handling: {G1s.index(G1)}-{G1}')
         begin_time = time.time()
         total_match = 0
@@ -212,12 +217,15 @@ def pattern_matching(test_dir, pattern_dir, step: int):
 
         if flag: # 计算已经匹配出来的
             print(f'continue {G1s.index(G1)}')
-            continue # 如果存在超时，跳过
+            # continue # 如果存在超时，跳过
 
         for i in confidence:
             confidence[i] = confidence.get(i) / total_match
         metrics = compute_metrics(confidence, G1)
         test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
+        temp = {k: v / (G1_index+1) for k, v in test_hit_rate.items()}
+        logger.info(f"Pattern Matching Test Metrics {temp}")
+
 
     test_hit_rate = {k: v / len(G1) for k, v in test_hit_rate.items()}
     logger.info(f"Pattern Matching Test finished, Test Metrics {test_hit_rate}")
