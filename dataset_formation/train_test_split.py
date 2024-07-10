@@ -27,11 +27,12 @@ def split_dataset_by_ratio(input_dir: str, output_dir: str, train_ratio: int = 0
         # 获取XML文档的根元素
         code_context_model = tree.getroot()
         first_time = code_context_model.get('first_time')
-        all_models.append([model_dir, first_time])
+        all_models.append([os.path.join(input_dir, model_dir), first_time])
     all_models = sorted(all_models, key=lambda x: x[1])
+    all_models = np.array(all_models)
     train_size = int(0.8 * len(all_models))
-    train_models = all_models[:train_size]
-    test_models = all_models[train_size:]
+    train_models = all_models[:train_size, 0].tolist()
+    test_models = all_models[train_size:, 0].tolist()
     # write the training and testing sets to files
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

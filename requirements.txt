@@ -11,3 +11,4 @@ numpy
 dgl
 scikit-learn 
 torchmetrics
+pip install gspan_mining

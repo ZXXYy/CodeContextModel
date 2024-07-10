@@ -8,3 +8,4 @@ __pycache__/
 wandb
 bge_embedding_results2
 *.pt
+*.data
