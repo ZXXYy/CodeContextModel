@@ -4,6 +4,7 @@ import logging
 import math
 import argparse
 import time
+import multiprocessing
 
 import gspan_mining.config
 import gspan_mining.main
@@ -166,8 +167,47 @@ def node_match(node1, node2):
 def edge_match(edge1, edge2):
     return edge1['label'] == edge2['label']
 
-def graph_matc_task():
-    pass
+def graph_match_task(G1: nx.DiGraph, G1_index: int,  G2s: list[nx.DiGraph], step: int):
+    logger.info(f'handling: {G1_index}-{G1}')
+    begin_time = time.time()
+    total_match = 0
+    confidence = dict()
+    flag = False
+    for G2 in G2s:
+        curr_time = time.time()
+        if curr_time - begin_time > 60 * 10:
+            flag = True
+            break
+        GM = isomorphism.DiGraphMatcher(G1, G2, node_match=node_match, edge_match=edge_match)
+        # 检查 G1 是否包含 G2 的子图同构
+        if GM.subgraph_is_isomorphic():
+            # 遍历每个子图同构
+            for sub_iter in GM.subgraph_isomorphisms_iter():
+                curr_time = time.time()
+                if curr_time - begin_time > 60 * 10:
+                    flag = True
+                    break
+
+                # 获取同构子图的节点id列表
+                nodes = list(map(int, list(sub_iter.keys())))
+                num_seeds = 0
+                for node in nodes:
+                    num_seeds += int(G1.nodes.get(node)['seed'])
+                # 匹配的子图中不属于 ground truth的节点数不能超过当前的预测步长 step 
+                # FIXME: 这样合理吗
+                if len(nodes) - num_seeds > step:
+                    continue
+                total_match += 1
+                for node in nodes:
+                    confidence[node] = confidence.setdefault(node, 0) + 1
+    # if flag: # 计算已经匹配出来的
+    #     print(f'continue {G1s.index(G1)}')
+        # continue # 如果存在超时，跳过
+
+    for i in confidence:
+        confidence[i] = confidence.get(i) / total_match
+    metrics = compute_metrics(confidence, G1)
+    return metrics
 
 
 def pattern_matching(test_dir, pattern_dir, step: int):
@@ -181,54 +221,16 @@ def pattern_matching(test_dir, pattern_dir, step: int):
         'top5_hit': 0,
     }
 
-    for G1_index, G1 in tqdm(enumerate(G1s)):
-        logger.info(f'handling: {G1s.index(G1)}-{G1}')
-        begin_time = time.time()
-        total_match = 0
-        confidence = dict()
-        flag = False
-        for G2 in G2s:
-            curr_time = time.time()
-            if curr_time - begin_time > 60 * 10:
-                flag = True
-                break
-            GM = isomorphism.DiGraphMatcher(G1, G2, node_match=node_match, edge_match=edge_match)
-            # 检查 G1 是否包含 G2 的子图同构
-            if GM.subgraph_is_isomorphic():
-                # 遍历每个子图同构
-                for sub_iter in GM.subgraph_isomorphisms_iter():
-                    curr_time = time.time()
-                    if curr_time - begin_time > 60 * 10:
-                        flag = True
-                        break
-
-                    # 获取同构子图的节点id列表
-                    nodes = list(map(int, list(sub_iter.keys())))
-                    num_seeds = 0
-                    for node in nodes:
-                        num_seeds += int(G1.nodes.get(node)['seed'])
-                    # 匹配的子图中不属于 ground truth的节点数不能超过当前的预测步长 step 
-                    # FIXME: 这样合理吗
-                    if len(nodes) - num_seeds > step:
-                        continue
-                    total_match += 1
-                    for node in nodes:
-                        confidence[node] = confidence.setdefault(node, 0) + 1
-
-        if flag: # 计算已经匹配出来的
-            print(f'continue {G1s.index(G1)}')
-            # continue # 如果存在超时，跳过
-
-        for i in confidence:
-            confidence[i] = confidence.get(i) / total_match
-        metrics = compute_metrics(confidence, G1)
-        test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
-        temp = {k: v / (G1_index+1) for k, v in test_hit_rate.items()}
-        logger.info(f"Pattern Matching Test Metrics {temp}")
-
-
-    test_hit_rate = {k: v / len(G1) for k, v in test_hit_rate.items()}
-    logger.info(f"Pattern Matching Test finished, Test Metrics {test_hit_rate}")
+    start_time = time.time()
+    # parallelly handle G1s 
+    with multiprocessing.Pool(processes=32) as pool:
+        results = [pool.apply_async(graph_match_task, args=(G1, G1s.index(G1), G2s, step)) for G1 in G1s]
+        for res in results:
+            metrics = res.get()
+            test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
+        test_hit_rate = {k: v / len(results) for k, v in test_hit_rate.items()}
+    end_time = time.time()
+    logger.info(f"Pattern Matching Test finished!\nTime: {end_time - start_time}\nTest Metrics {test_hit_rate} ")
 
 def compute_metrics(confidence, G1):
     confidence = sorted(confidence.items(), key=lambda d: d[1], reverse=True)  # [(3, 1.0), (17, 0.5), (14, 0.5)]
