@@ -4,6 +4,8 @@ import logging
 import math
 import argparse
 import time
+import heapq
+import random
 import multiprocessing
 
 import gspan_mining.config
@@ -241,10 +243,21 @@ def compute_metrics(confidence, G1):
     for topk in range(1,6):
         temp = topk
         topk = topk if len(confidence) >= topk else len(confidence)
+
+        # if tie in the topk, we randomly pick the first topk node
+        topk_values = heapq.nlargest(topk, set([item[1] for item in confidence]))
+        # print(f"top {topk} values: {topk_values}")
+        topk_nodes = []
+        for value in topk_values:
+            nodes_with_value = [item for item in confidence if item[1] == value]
+            num_select = min(topk-len(topk_nodes), len(nodes_with_value))
+            topk_nodes = topk_nodes + random.sample(nodes_with_value, num_select)
+            if len(topk_nodes) == topk:
+                break
+
         hit = 0
-        for i in range(0, topk):
-            idx = confidence[i][0] # get the index of the top3 embeddings
-            if  G1.nodes.get(idx)['origin'] == 1: # get positive nodes
+        for node in topk_nodes:
+            if  G1.nodes.get(node[0])['origin'] == 1: # get positive nodes
                 hit = 1
                 break
         total_hit[f"top{temp}_hit"] += hit
