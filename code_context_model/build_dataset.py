@@ -1,7 +1,7 @@
 import os
 import dgl
 import torch
-import os
+import json
 import shutil
 import random
 import logging
@@ -46,7 +46,7 @@ class ExpandGraphDataset(DGLDataset):
         logger.info(f"building dataset from xml files len: {len(self.xml_files)}...")
         self.graphs = []
         for xml_file in tqdm(self.xml_files):
-            model_dir = xml_file.split('/')[-3]
+            model_dir = xml_file.split('/')[-2]
             embedding_path = os.path.join(self.embedding_dir, f"{model_dir}_{self.embedding_model}_embedding.pkl")
             # load embedding
             with open(embedding_path, 'rb') as f:
@@ -132,43 +132,33 @@ class ExpandGraphDataset(DGLDataset):
     def __len__(self):
         return len(self.graphs)
     
-def split_dataset(dataset, train_ratio=0.8, valid_ratio=0.1):
+def split_dataset(dataset, train_ratio=0.9):
     # 生成数据集索引
     indices = np.arange(len(dataset))
     # 划分训练集和测试集
-    train_indices, test_indices = train_test_split(indices, test_size=0.2, train_size=0.8, random_state=42)
+    # train_indices, test_indices = train_test_split(indices, test_size=0.2, train_size=0.8, random_state=42)
 
     # 划分训练集和验证集
-    train_indices, valid_indices = train_test_split(train_indices, test_size=0.1, train_size=0.9, random_state=42)
+    train_indices, valid_indices = train_test_split(indices, test_size=1-train_ratio, train_size=train_ratio, random_state=42)
 
     train_dataset = torch.utils.data.Subset(dataset, train_indices)
     valid_dataset = torch.utils.data.Subset(dataset, valid_indices)
-    test_dataset = torch.utils.data.Subset(dataset, test_indices)
+    # test_dataset = torch.utils.data.Subset(dataset, test_indices)
 
-    return train_dataset, valid_dataset, test_dataset
+    return train_dataset, valid_dataset
 
-def read_xml_dataset(data_dir):
+def read_xml_dataset(data_dir, dataset_type, steps: list = [1, 2, 3]):
     result_xmls = []
-    dir_names = os.listdir(data_dir)
+    model_dirs = json.loads(open(f'{data_dir}/{dataset_type}_index.json').read())
     
-    for dir_name in dir_names:
-        # dataset_dir = os.path.join(data_dir, dir_name, "1_step_collaspe")
-        # if not os.path.exists(dataset_dir):
-        #     continue
-        # for file_name in os.listdir(dataset_dir):
-        #     if file_name.endswith(".xml"):
-        #         result_xmls.append(os.path.join(dataset_dir, file_name))
-        # file_names = os.listdir(dataset_dir)
-        # step_1_files = [f for f in file_names if f.startswith("collapse_1_step")]
-        step_1_dir = os.path.join(data_dir, dir_name, "1_step_seeds_cc")
-        if not os.path.exists(step_1_dir):
-            continue
-        for step_1_file in os.listdir(step_1_dir):
-            logger.debug(f"Step 1 file: {step_1_file}")
-            if os.path.exists(os.path.join(step_1_dir, step_1_file)):
-                result_xmls.append(os.path.join(step_1_dir, step_1_file))
-    
-    logger.info(f"Read total xml files: {len(result_xmls)}")
+    for dir_name in model_dirs:
+        for step in steps:
+            expand_graph_path = os.path.join(dir_name, f"{step}_step_seeds_expanded_model.xml")
+            if os.path.exists(expand_graph_path):
+                # logger.info(f"Read xml file: {expand_graph_path}")
+                result_xmls.append(expand_graph_path)
+            
+    logger.info(f"Read total {dataset_type} xml files: {len(result_xmls)}")
     return result_xmls
 
 if __name__ == '__main__':
@@ -177,13 +167,21 @@ if __name__ == '__main__':
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
     parser.add_argument('--embedding_dir', type=str, default='data', help='embedding directory')
     parser.add_argument('--output_dir', type=str, default='dataset', help='dataset output directory')
+    parser.add_argument('--step', type=int, help='generate dataset for specific step')
+    parser.add_argument('--all_step', action='store_true', help='generate all steps data in one dataset')
     parser.add_argument('--debug', action='store_true', help='debug mode')
+
     
     args = parser.parse_args()
+    
+    steps = [1, 2, 3] if args.all_step else [args.step]
+    train_xml_files = read_xml_dataset(args.input_dir, "train", steps)
+    test_xml_files = read_xml_dataset(args.input_dir, "test", steps)
 
-    xml_files = read_xml_dataset(args.input_dir)
-    data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', debug=args.debug)
-    train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
+    train_data_builder = ExpandGraphDataset(xml_files=train_xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', debug=args.debug)
+    test_dataset = ExpandGraphDataset(xml_files=test_xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', debug=args.debug)
+
+    train_dataset, valid_dataset = split_dataset(train_data_builder)
 
     logger.info(f"train dataset: {len(train_dataset)}")
     logger.info(f"valid dataset: {len(valid_dataset)}")
