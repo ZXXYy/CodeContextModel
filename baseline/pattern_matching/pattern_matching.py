@@ -200,9 +200,9 @@ def graph_match_task(G1: nx.DiGraph, G1_index: int,  G2s: list[nx.DiGraph], step
                 total_match += 1
                 for node in nodes:
                     confidence[node] = confidence.setdefault(node, 0) + 1
-    # if flag: # 计算已经匹配出来的
-    #     print(f'continue {G1s.index(G1)}')
-        # continue # 如果存在超时，跳过
+    if flag: # 计算已经匹配出来的
+        # print(f'continue {G1_index}')
+        return None # 如果存在超时，跳过
 
     for i in confidence:
         confidence[i] = confidence.get(i) / total_match
@@ -215,20 +215,19 @@ def pattern_matching(test_dir, pattern_dir, step: int):
     G2s = load_patterns(pattern_dir)
     logger.info(f'Load Test Graphs Len: {len(G1s)}')
     logger.info(f'Load Pattern Graphs Len: {len(G2s)}')
-    test_hit_rate = {
-        'top3_hit': 0,
-        'top4_hit': 0,
-        'top5_hit': 0,
-    }
+    test_hit_rate = {f"top{i}_hit": 0 for i in range(1, 6)}
 
     start_time = time.time()
     # parallelly handle G1s 
     with multiprocessing.Pool(processes=32) as pool:
         results = [pool.apply_async(graph_match_task, args=(G1, G1s.index(G1), G2s, step)) for G1 in G1s]
+        cnt = 0
         for res in results:
             metrics = res.get()
-            test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
-        test_hit_rate = {k: v / len(results) for k, v in test_hit_rate.items()}
+            if metrics:
+                cnt += 1
+                test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
+        test_hit_rate = {k: v / cnt for k, v in test_hit_rate.items()}
     end_time = time.time()
     logger.info(f"Pattern Matching Test finished!\nTime: {end_time - start_time}\nTest Metrics {test_hit_rate} ")
 
@@ -237,12 +236,9 @@ def compute_metrics(confidence, G1):
     # filter out seed nodes
     confidence = list(filter(lambda x: G1.nodes.get(x[0])['seed'] == 0, confidence))  
 
-    total_hit = {
-        'top3_hit': 0,
-        'top4_hit': 0,
-        'top5_hit': 0,
-    }
-    for topk in range(3,6):
+    total_hit = {f"top{i}_hit": 0 for i in range(1, 6)}
+
+    for topk in range(1,6):
         temp = topk
         topk = topk if len(confidence) >= topk else len(confidence)
         hit = 0
