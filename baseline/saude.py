@@ -180,31 +180,27 @@ def load_interest_nodes(graphs) -> list[list[int]]:
         gI.append(I)
     return gI
 
-def compute_metrics(G1, confidence):
-    confidence = dict(sorted(confidence.items(), key=lambda item: item[1].degree, reverse=True)) # {1: (1, 0.7), 2: (2, 0.2), 3: (3, 0.5)}
-    # filter out seed nodes
-    confidence = [v for k, v in confidence.items() if G1.nodes[k]['seed'] == 0]
-    # for i in range(len(confidence)):
-    #     print(confidence[i])
-    # print("="*16)
+def select_random_nodes_with_tie(confidence, topk):
+    topk_values = heapq.nlargest(topk, set([item.degree for item in confidence]))
+    # print(f"top {topk} values: {topk_values}")
+    topk_nodes = []
+    for value in topk_values:
+        nodes_with_value = [item for item in confidence if item.degree == value]
+        num_select = min(topk-len(topk_nodes), len(nodes_with_value))
+        topk_nodes = topk_nodes + random.sample(nodes_with_value, num_select)
+        if len(topk_nodes) == topk:
+            break
+    return topk_nodes
 
-    
+
+def compute_hit_rate(G1, confidence):
     total_hit = {f'top{i}_hit': 0 for i in range(1,6)}
     for topk in range(1,6):
         temp = topk
         topk = topk if len(confidence) >= topk else len(confidence)
         hit = 0
         # if tie in the topk, we randomly pick the first topk node
-        topk_values = heapq.nlargest(topk, set([item.degree for item in confidence]))
-        # print(f"top {topk} values: {topk_values}")
-        topk_nodes = []
-        for value in topk_values:
-            nodes_with_value = [item for item in confidence if item.degree == value]
-            num_select = min(topk-len(topk_nodes), len(nodes_with_value))
-            topk_nodes = topk_nodes + random.sample(nodes_with_value, num_select)
-            if len(topk_nodes) == topk:
-                break
-        
+        topk_nodes = select_random_nodes_with_tie(confidence, topk)
         # for i in range(len(topk_nodes)):
         #     print(topk_nodes[i])
         # print("="*16)
@@ -217,15 +213,47 @@ def compute_metrics(G1, confidence):
 
     return total_hit
 
+def compute_mrr(G1, confidence):
+    mrr = 0
+    for i, item in enumerate(confidence):
+        if G1.nodes.get(item.name)['origin'] == 1:
+            mrr = 1 / (i + 1)
+            break
+    return {'MRR': mrr}
+
+def compute_map(G1, confidence, step, topk=5):
+    MAP = 0
+    positive_cnt = 0
+    topk_nodes = select_random_nodes_with_tie(confidence, topk)
+    for i, node in enumerate(topk_nodes):
+        if G1.nodes.get(node.name)['origin'] == 1:
+            positive_cnt += 1
+            MAP += positive_cnt / (i + 1)
+    MAP = MAP / step
+    return {'MAP': MAP}
+
+def compute_metrics(G1, confidence, step):
+    confidence = dict(sorted(confidence.items(), key=lambda item: item[1].degree, reverse=True)) # {1: (1, 0.7), 2: (2, 0.2), 3: (3, 0.5)}
+    # filter out seed nodes
+    confidence = [v for k, v in confidence.items() if G1.nodes[k]['seed'] == 0]
+    metrics = compute_hit_rate(G1, confidence)
+    mrr = compute_mrr(G1, confidence)
+    MAP = compute_map(G1, confidence, step)
+    metrics.update(mrr)
+    metrics.update(MAP)
+    return metrics
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
+    parser.add_argument('--step', type=int, default='stpe', help='step of the seed expanded model')
     args = parser.parse_args()
 
-    test_hit_rate = {f"top{i}_hit": 0 for i in range(1, 6)}
+    test_metrics = {f"top{i}_hit": 0 for i in range(1, 6)}
+    test_metrics.update({'MRR': 0, 'MAP': 0})
 
-    G1s = load_tests(args.input_dir, 1)
+    G1s = load_tests(args.input_dir, args.step)
     gI = load_interest_nodes(G1s) 
     relations = ["declares", "calls", "inherits", "implements"]
     start_time = time.time()
@@ -234,9 +262,9 @@ if __name__ == '__main__':
         suade = Suade(G1s[i], gI[i], relations)
         degrees = suade.main()
 
-        metrics = compute_metrics(G1s[i], degrees)
-        test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
+        metrics = compute_metrics(G1s[i], degrees, args.step)
+        test_metrics = {k: test_metrics[k] + metrics[k] for k in metrics}
     
     end_time = time.time()
-    test_hit_rate = {k: v / len(G1s) for k, v in test_hit_rate.items()}
-    logger.info(f"Saude finished!\nTime: {end_time - start_time}\nTest Metrics {test_hit_rate} ")
+    test_metrics = {k: v / len(G1s) for k, v in test_metrics.items()}
+    logger.info(f"Saude finished!\nTime: {end_time - start_time}\nTest Metrics {test_metrics} ")
