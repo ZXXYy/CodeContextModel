@@ -206,7 +206,7 @@ def graph_match_task(G1: nx.DiGraph, G1_index: int,  G2s: list[nx.DiGraph], step
 
     for i in confidence:
         confidence[i] = confidence.get(i) / total_match
-    metrics = compute_metrics(confidence, G1)
+    metrics = compute_metrics(confidence, G1, step)
     return metrics
 
 
@@ -215,7 +215,8 @@ def pattern_matching(test_dir, pattern_dir, step: int):
     G2s = load_patterns(pattern_dir)
     logger.info(f'Load Test Graphs Len: {len(G1s)}')
     logger.info(f'Load Pattern Graphs Len: {len(G2s)}')
-    test_hit_rate = {f"top{i}_hit": 0 for i in range(1, 6)}
+    test_metrics = {f"top{i}_hit": 0 for i in range(1, 6)}
+    test_metrics.update({'MRR': 0, 'MAP': 0})
 
     start_time = time.time()
     # parallelly handle G1s 
@@ -226,16 +227,12 @@ def pattern_matching(test_dir, pattern_dir, step: int):
             metrics = res.get()
             if metrics:
                 cnt += 1
-                test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
-        test_hit_rate = {k: v / cnt for k, v in test_hit_rate.items()}
+                test_metrics = {k: test_metrics[k] + metrics[k] for k in metrics}
+        test_metrics = {k: v / cnt for k, v in test_metrics.items()}
     end_time = time.time()
-    logger.info(f"Pattern Matching Test finished!\nTime: {end_time - start_time}\nTest Metrics {test_hit_rate} ")
+    logger.info(f"Pattern Matching Test finished!\nTime: {end_time - start_time}\nTest Metrics {test_metrics} ")
 
-def compute_metrics(confidence, G1):
-    confidence = sorted(confidence.items(), key=lambda d: d[1], reverse=True)  # [(3, 1.0), (17, 0.5), (14, 0.5)]
-    # filter out seed nodes
-    confidence = list(filter(lambda x: G1.nodes.get(x[0])['seed'] == 0, confidence))  
-
+def compute_hit_rate(G1, confidence):
     total_hit = {f"top{i}_hit": 0 for i in range(1, 6)}
 
     for topk in range(1,6):
@@ -250,6 +247,41 @@ def compute_metrics(confidence, G1):
         total_hit[f"top{temp}_hit"] += hit
 
     return total_hit
+
+def compute_mrr(G1, confidence):
+    mrr = 0
+    for i, item in enumerate(confidence):
+        if i > 100:
+            return 0
+        if G1.nodes.get(item[0])['origin'] == 1:
+            mrr = 1 / (i + 1)
+            break
+    return {'MRR': mrr}
+
+def compute_map(G1, confidence, step, topk=5):
+    MAP = 0
+    positive_cnt = 0
+    for i, item in enumerate(confidence):
+        if i >= topk:
+            break
+        if G1.nodes.get(item[0])['origin'] == 1:
+            positive_cnt += 1
+            MAP += positive_cnt / (i + 1)
+    MAP = MAP / step
+    return {'MAP': MAP}
+
+
+def compute_metrics(confidence, G1, step):
+    confidence = sorted(confidence.items(), key=lambda d: d[1], reverse=True)  # [(3, 1.0), (17, 0.5), (14, 0.5)]
+    # filter out seed nodes
+    confidence = list(filter(lambda x: G1.nodes.get(x[0])['seed'] == 0, confidence))  
+    
+    metrics = compute_hit_rate(G1, confidence)
+    mrr = compute_mrr(G1, confidence)
+    MAP = compute_map(G1, confidence, step)
+    metrics.update(mrr)
+    metrics.update(MAP)
+    return metrics
 
 
 if __name__ == '__main__':
