@@ -252,7 +252,7 @@ def compute_mrr(G1, confidence):
     mrr = 0
     for i, item in enumerate(confidence):
         if i > 100:
-            return 0
+            return {'MRR': 0}
         if G1.nodes.get(item[0])['origin'] == 1:
             mrr = 1 / (i + 1)
             break
