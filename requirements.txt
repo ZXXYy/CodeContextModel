@@ -11,3 +11,5 @@ numpy
 dgl
 scikit-learn 
 torchmetrics
+gspan_mining
+networkx
