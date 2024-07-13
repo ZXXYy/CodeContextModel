@@ -72,8 +72,8 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     total_hit = {}
     for i in range(1, 6):
         total_hit[f'top{i}_hit'] = 0
-        total_hit[f'top{i}_precision'] = 0
-        total_hit[f'top{i}_recall'] = 0
+        # total_hit[f'top{i}_precision'] = 0
+        # total_hit[f'top{i}_recall'] = 0
 
     logger.debug(f"Batch num:{batch_num_nodes}")
     for k in range(batch_size):
@@ -88,20 +88,18 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
         similarities = []
         logger.debug(f"num seed indices: {len(seed_indices)}, num non seed indices: {len(non_seed_indices)}")
         logger.debug(f"num seed embeddings: {len(seed_embeddings)}, num non seed embeddings: {len(non_seed_embeddings)}")
-        for i in range(0, len(seed_embeddings)):
-            temp = torch.tensor([]).to(device)
-            for embedding in non_seed_embeddings:
-                temp = torch.cat((temp, cosine_similarity(seed_embeddings[i], embedding)))
-            logger.debug(f"similarities for seed_embeddings {i}: {temp}")
-            similarities = similarities + [temp]
+
+        similarities = F.cosine_similarity(seed_embeddings[:,None,:] , non_seed_embeddings[None,:,:] , dim=-1) # [num_seed, num_non_seed]
+        logger.debug(f"Similarities shape: {similarities.shape}")
         logger.debug(f"Similarities: {similarities}")
-        similarities = torch.sum(torch.stack(similarities), dim=0)
+        # Sum the similarities across all seed embeddings
+        similarities = similarities.sum(dim=0).squeeze(1)
+        logger.debug(f"Summed similarities shape: {similarities.shape}")
         logger.debug(f"Similarities: {similarities}")
-        logger.debug(f"similarities type: {similarities.shape}")
         # find top3 similar embeddings
         for topk in range(1,6):
             temp = topk
-            topk = topk if len(non_seed_indices) >= topk else len(non_seed_indices)
+            topk = min(topk, len(non_seed_indices))
             topk_indices = torch.topk(similarities, topk).indices
             logger.debug(f"Top{topk} indices: {topk_indices}")
             hit = 0
@@ -110,8 +108,8 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
                 if labels[idx] == 1:
                     hit += 1
                     break
-            total_hit[f"top{temp}_precision"] += (hit+len(seed_indices)) / (topk+len(seed_indices))
-            total_hit[f"top{temp}_recall"] += (hit+len(seed_indices)) / (len(seed_indices)+len(positive_indices))
+            # total_hit[f"top{temp}_precision"] += (hit+len(seed_indices)) / (topk+len(seed_indices))
+            # total_hit[f"top{temp}_recall"] += (hit+len(seed_indices)) / (len(seed_indices)+len(positive_indices))
             total_hit[f"top{temp}_hit"] += 1 if hit > 0 else 0
         start_idx += batch_num_nodes[k]
 
@@ -124,55 +122,58 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
 def compute_loss(batch_logits, batch_labels, batch_num_nodes):
     batch_size = len(batch_num_nodes)
     start_idx = 0
-    total_loss = 0
+    total_losses = []
     logger.debug(f"Batch num: {batch_num_nodes}")
 
     for i in range(batch_size):
         # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
         labels = batch_labels[start_idx : start_idx + batch_num_nodes[i]]
         logits = batch_logits[start_idx : start_idx + batch_num_nodes[i]]
-        seed_indices = (labels == -1).nonzero()
-        positive_indices = (labels == 1).nonzero()
-        negative_indices = (labels == 0).nonzero()
+        seed_indices = (labels == -1).nonzero().view(-1)
+        positive_indices = (labels == 1).nonzero().view(-1)
+        negative_indices = (labels == 0).nonzero().view(-1)
         embeddings = logits
         logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
         
-        # 生成所有可能的 (seed_index, positive_index) 组合对
-        seed_positive_pairs = list(product(seed_indices, positive_indices))
-        # 提取组合对的嵌入
-        seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_positive_pairs])
-        positive_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_positive_pairs])
-        # 定义 margin
-        neg_margin = 0.0
-        pos_margin = 1.0
-        # 计算正样本对之间的欧氏距离
-        # positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
-        positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
-        # 构建正样本对标签（全1）
-        positive_labels = torch.ones(positive_distances.size(), device=positive_distances.device)
-        # 计算正样本对的 Contrastive Loss
-        positive_loss = torch.mean(positive_labels *  torch.clamp(pos_margin-positive_distances, min=0.0).pow(2)) 
+        if len(positive_indices) > 0:
+            # 生成所有可能的 (seed_index, positive_index) 组合对
+            seed_positive_pairs = torch.cartesian_prod(seed_indices, positive_indices)
+            # 提取组合对的嵌入
+            seed_pair_embeddings = embeddings[seed_positive_pairs[:, 0]]
+            positive_pair_embeddings = embeddings[seed_positive_pairs[:, 1]]
+            # 定义 margin
+            neg_margin = 0.0
+            pos_margin = 1.0
+            # 计算正样本对之间的欧氏距离
+            # positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
+            positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
+            # 构建正样本对标签（全1）
+            positive_labels = torch.ones(positive_distances.size(), device=positive_distances.device)
+            # 计算正样本对的 Contrastive Loss
+            positive_loss = torch.mean(positive_labels *  torch.clamp(pos_margin-positive_distances, min=0.0).pow(2)) 
+        else:
+            positive_loss = torch.tensor(0.0, device=logits.device)
 
-        if len(negative_indices) == 0:
-            return positive_loss
-        # 生成所有可能的 (seed, negative) 组合对
-        seed_negative_pairs = list(product(seed_indices, negative_indices))
-        # 提取组合对的嵌入
-        seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_negative_pairs])
-        negative_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_negative_pairs])
-        # 计算负样本对之间的欧氏距离
-        # negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
-        negative_distances = pairwise_cosine_similarity(seed_pair_embeddings, negative_pair_embeddings)
-        # 构建负样本对标签（全0）
-        negative_labels = torch.zeros(negative_distances.size(), device=negative_distances.device)
-        # 计算负样本对的 Contrastive Loss
-        negative_loss = torch.mean((1 - negative_labels) * torch.clamp(negative_distances-neg_margin, min=0.0).pow(2))
-
+        if len(negative_indices) > 0:
+            # 生成所有可能的 (seed, negative) 组合对
+            seed_negative_pairs = torch.cartesian_prod(seed_indices, negative_indices)
+            # 提取组合对的嵌入
+            seed_pair_embeddings = embeddings[seed_negative_pairs[:, 0]]
+            negative_pair_embeddings = embeddings[seed_negative_pairs[:, 1]]
+            # 计算负样本对之间的欧氏距离
+            # negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
+            negative_distances = pairwise_cosine_similarity(seed_pair_embeddings, negative_pair_embeddings)
+            # 构建负样本对标签（全0）
+            negative_labels = torch.zeros(negative_distances.size(), device=negative_distances.device)
+            # 计算负样本对的 Contrastive Loss
+            negative_loss = torch.mean((1 - negative_labels) * torch.clamp(negative_distances-neg_margin, min=0.0).pow(2))
+        else:
+            negative_loss = torch.tensor(0.0, device=logits.device)
         # 总的 Contrastive Loss
-        total_loss += positive_loss + negative_loss
+        total_losses.append(positive_loss + negative_loss)
         start_idx += batch_num_nodes[i]
 
-    return total_loss # , non_seed_logits, non_seed_labels
+    return torch.stack(total_losses).mean() # , non_seed_logits, non_seed_labels
 
 def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
     logger.info("======= Start training =======")
@@ -180,6 +181,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
     num_epochs = kwargs.get('num_epochs', 50)
     threshold = kwargs.get('threshold', 0.5)
     output_dir = kwargs.get('output_dir', 'output')
+    debug = kwargs.get('debug', False)
     # 定义损失函数和优化器
     # loss_fn = nn.BCELoss()
     # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
@@ -198,11 +200,11 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
         eval_hit_rate = {}
         for i in range(1, 6):
             train_hit_rate[f'top{i}_hit'] = 0
-            train_hit_rate[f'top{i}_precision'] = 0
-            train_hit_rate[f'top{i}_recall'] = 0
+            # train_hit_rate[f'top{i}_precision'] = 0
+            # train_hit_rate[f'top{i}_recall'] = 0
             eval_hit_rate[f'top{i}_hit'] = 0
-            eval_hit_rate[f'top{i}_precision'] = 0
-            eval_hit_rate[f'top{i}_recall'] = 0
+            # eval_hit_rate[f'top{i}_precision'] = 0
+            # eval_hit_rate[f'top{i}_recall'] = 0
         
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
@@ -216,11 +218,13 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
             batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
             batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
+            logger.info("Model Forwarding...")
             logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
             # if epoch > 10:
             #     logger.info(f"Logits: {logits}")
             #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
             # loss = loss_fn(anchor_embedding, positive_embedding, negative_embedding)
+            logger.info("Loss computing...")
             loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
 
             optimizer.zero_grad()
@@ -228,6 +232,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             optimizer.step()
             total_loss += loss.item()
             
+            logger.info("Metrics computing...")
             metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist()) # FIXME: wrong train metrics if batchsize > 1
             train_hit_rate = {k: train_hit_rate[k] + metrics[k] for k in metrics}
             if verbose:
@@ -260,7 +265,8 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
         }
         wandb_log.update(train_hit_rate)
         wandb_log.update(eval_hit_rate)
-        wandb.log(wandb_log)
+        if not debug:
+            wandb.log(wandb_log)
         logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_hit_rate}")
         logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
         # save the model
@@ -301,7 +307,6 @@ def test(model, test_loader, **kwargs):
     
 
 if __name__ == "__main__":
-    wandb.init(project="code-context-model")
 
     parser = argparse.ArgumentParser()
     # train args
@@ -330,6 +335,14 @@ if __name__ == "__main__":
     if args.debug:
         args.num_epochs = 1 
         args.test_model_pth = 'model_0.pth'
+    else:
+        wandb.init(project="code-context-model")
+        # 配置wandb
+        config = wandb.config
+        config.learning_rate = args.lr
+        config.batch_size = args.train_batch_size
+        config.epochs = args.num_epochs
+        config.device = args.device
     if args.do_train:
         args.test_model_pth = os.path.join(args.output_dir, args.test_model_pth)   
     
@@ -339,13 +352,6 @@ if __name__ == "__main__":
 
     global device
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
-    
-    # 配置wandb
-    config = wandb.config
-    config.learning_rate = args.lr
-    config.batch_size = args.train_batch_size
-    config.epochs = args.num_epochs
-    config.device = args.device
 
     # 设置随机种子
     set_seed(args.seed)
@@ -382,7 +388,8 @@ if __name__ == "__main__":
             lr=args.lr,
             num_epochs=args.num_epochs,
             threshold=args.threshold,
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            debug=args.debug
         )
 
     if args.do_test:

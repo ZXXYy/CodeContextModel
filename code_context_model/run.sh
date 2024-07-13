@@ -5,7 +5,7 @@ python code_context_model/train.py \
 --train_batch_size 32 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
---input_dir "/data0/xiaoyez/CodeContextModel/collapsed_dataset" \
+--input_dir "/data0/xiaoyez/CodeContextModel/dataset_step1" \
 --embedding_dir "/data0/xiaoyez/CodeContextModel/bge_embedding_results2" \
 --output_dir "/data0/xiaoyez/CodeContextModel/model_output" \
 --num_epochs 50 \
