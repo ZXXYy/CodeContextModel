@@ -88,18 +88,20 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
         similarities = []
         logger.debug(f"num seed indices: {len(seed_indices)}, num non seed indices: {len(non_seed_indices)}")
         logger.debug(f"num seed embeddings: {len(seed_embeddings)}, num non seed embeddings: {len(non_seed_embeddings)}")
-
-        similarities = F.cosine_similarity(seed_embeddings[:,None,:] , non_seed_embeddings[None,:,:] , dim=-1) # [num_seed, num_non_seed]
-        logger.debug(f"Similarities shape: {similarities.shape}")
+        for i in range(0, len(seed_embeddings)):
+            temp = torch.tensor([]).to(device)
+            for embedding in non_seed_embeddings:
+                temp = torch.cat((temp, cosine_similarity(seed_embeddings[i], embedding)))
+            logger.debug(f"similarities for seed_embeddings {i}: {temp}")
+            similarities = similarities + [temp]
         logger.debug(f"Similarities: {similarities}")
-        # Sum the similarities across all seed embeddings
-        similarities = similarities.sum(dim=0).squeeze(1)
-        logger.debug(f"Summed similarities shape: {similarities.shape}")
+        similarities = torch.sum(torch.stack(similarities), dim=0)
         logger.debug(f"Similarities: {similarities}")
+        logger.debug(f"similarities type: {similarities.shape}")
         # find top3 similar embeddings
         for topk in range(1,6):
             temp = topk
-            topk = min(topk, len(non_seed_indices))
+            topk = topk if len(non_seed_indices) >= topk else len(non_seed_indices)
             topk_indices = torch.topk(similarities, topk).indices
             logger.debug(f"Top{topk} indices: {topk_indices}")
             hit = 0
@@ -122,58 +124,55 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
 def compute_loss(batch_logits, batch_labels, batch_num_nodes):
     batch_size = len(batch_num_nodes)
     start_idx = 0
-    total_losses = []
+    total_loss = 0
     logger.debug(f"Batch num: {batch_num_nodes}")
 
     for i in range(batch_size):
         # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
         labels = batch_labels[start_idx : start_idx + batch_num_nodes[i]]
         logits = batch_logits[start_idx : start_idx + batch_num_nodes[i]]
-        seed_indices = (labels == -1).nonzero().view(-1)
-        positive_indices = (labels == 1).nonzero().view(-1)
-        negative_indices = (labels == 0).nonzero().view(-1)
+        seed_indices = (labels == -1).nonzero()
+        positive_indices = (labels == 1).nonzero()
+        negative_indices = (labels == 0).nonzero()
         embeddings = logits
         logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
         
-        if len(positive_indices) > 0:
-            # 生成所有可能的 (seed_index, positive_index) 组合对
-            seed_positive_pairs = torch.cartesian_prod(seed_indices, positive_indices)
-            # 提取组合对的嵌入
-            seed_pair_embeddings = embeddings[seed_positive_pairs[:, 0]]
-            positive_pair_embeddings = embeddings[seed_positive_pairs[:, 1]]
-            # 定义 margin
-            neg_margin = 0.0
-            pos_margin = 1.0
-            # 计算正样本对之间的欧氏距离
-            # positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
-            positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
-            # 构建正样本对标签（全1）
-            positive_labels = torch.ones(positive_distances.size(), device=positive_distances.device)
-            # 计算正样本对的 Contrastive Loss
-            positive_loss = torch.mean(positive_labels *  torch.clamp(pos_margin-positive_distances, min=0.0).pow(2)) 
-        else:
-            positive_loss = torch.tensor(0.0, device=logits.device)
+        # 生成所有可能的 (seed_index, positive_index) 组合对
+        seed_positive_pairs = list(product(seed_indices, positive_indices))
+        # 提取组合对的嵌入
+        seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_positive_pairs])
+        positive_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_positive_pairs])
+        # 定义 margin
+        neg_margin = 0.0
+        pos_margin = 1.0
+        # 计算正样本对之间的欧氏距离
+        # positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
+        positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
+        # 构建正样本对标签（全1）
+        positive_labels = torch.ones(positive_distances.size(), device=positive_distances.device)
+        # 计算正样本对的 Contrastive Loss
+        positive_loss = torch.mean(positive_labels *  torch.clamp(pos_margin-positive_distances, min=0.0).pow(2)) 
 
-        if len(negative_indices) > 0:
-            # 生成所有可能的 (seed, negative) 组合对
-            seed_negative_pairs = torch.cartesian_prod(seed_indices, negative_indices)
-            # 提取组合对的嵌入
-            seed_pair_embeddings = embeddings[seed_negative_pairs[:, 0]]
-            negative_pair_embeddings = embeddings[seed_negative_pairs[:, 1]]
-            # 计算负样本对之间的欧氏距离
-            # negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
-            negative_distances = pairwise_cosine_similarity(seed_pair_embeddings, negative_pair_embeddings)
-            # 构建负样本对标签（全0）
-            negative_labels = torch.zeros(negative_distances.size(), device=negative_distances.device)
-            # 计算负样本对的 Contrastive Loss
-            negative_loss = torch.mean((1 - negative_labels) * torch.clamp(negative_distances-neg_margin, min=0.0).pow(2))
-        else:
-            negative_loss = torch.tensor(0.0, device=logits.device)
+        if len(negative_indices) == 0:
+            return positive_loss
+        # 生成所有可能的 (seed, negative) 组合对
+        seed_negative_pairs = list(product(seed_indices, negative_indices))
+        # 提取组合对的嵌入
+        seed_pair_embeddings = torch.stack([embeddings[pair[0]].squeeze(0) for pair in seed_negative_pairs])
+        negative_pair_embeddings = torch.stack([embeddings[pair[1]].squeeze(0) for pair in seed_negative_pairs])
+        # 计算负样本对之间的欧氏距离
+        # negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
+        negative_distances = pairwise_cosine_similarity(seed_pair_embeddings, negative_pair_embeddings)
+        # 构建负样本对标签（全0）
+        negative_labels = torch.zeros(negative_distances.size(), device=negative_distances.device)
+        # 计算负样本对的 Contrastive Loss
+        negative_loss = torch.mean((1 - negative_labels) * torch.clamp(negative_distances-neg_margin, min=0.0).pow(2))
+
         # 总的 Contrastive Loss
-        total_losses.append(positive_loss + negative_loss)
+        total_loss += positive_loss + negative_loss
         start_idx += batch_num_nodes[i]
 
-    return torch.stack(total_losses).mean() # , non_seed_logits, non_seed_labels
+    return total_loss # , non_seed_logits, non_seed_labels
 
 def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
     logger.info("======= Start training =======")
@@ -218,13 +217,13 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
             batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
             batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
-            logger.info("Model Forwarding...")
+            logger.debug("Model Forwarding...")
             logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
             # if epoch > 10:
             #     logger.info(f"Logits: {logits}")
             #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
             # loss = loss_fn(anchor_embedding, positive_embedding, negative_embedding)
-            logger.info("Loss computing...")
+            logger.debug("Loss computing...")
             loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
 
             optimizer.zero_grad()
@@ -232,7 +231,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             optimizer.step()
             total_loss += loss.item()
             
-            logger.info("Metrics computing...")
+            logger.debug("Metrics computing...")
             metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist()) # FIXME: wrong train metrics if batchsize > 1
             train_hit_rate = {k: train_hit_rate[k] + metrics[k] for k in metrics}
             if verbose:
