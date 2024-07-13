@@ -1,4 +1,5 @@
 import os
+os.environ["DGLBACKEND"] = "pytorch"
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 import random
@@ -10,11 +11,15 @@ import dgl
 import wandb
 import atexit
 import numpy as np
+import torch.distributed as dist
+import torch.nn.functional as F
+import torch.multiprocessing as mp
 
 from tqdm import tqdm
 from torch import nn
 from itertools import product
-import torch.nn.functional as F
+from dgl.dataloading import GraphDataLoader
+from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryF1Score, BinaryPrecision, BinaryRecall
 
@@ -66,7 +71,7 @@ def euclidean_distance(x1, x2):
     return torch.dist(x1, x2).item()
 
 
-def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
+def compute_metrics(batch_logits, batch_labels, batch_num_nodes, device):
     batch_size = len(batch_num_nodes)
     start_idx = 0
     total_hit = {}
@@ -175,12 +180,16 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
     return total_loss # , non_seed_logits, non_seed_labels
 
 def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
-    logger.info("======= Start training =======")
     lr = kwargs.get('lr', 0.01)
     num_epochs = kwargs.get('num_epochs', 50)
     threshold = kwargs.get('threshold', 0.5)
     output_dir = kwargs.get('output_dir', 'output')
     debug = kwargs.get('debug', False)
+    device = kwargs.get('device', torch.device("cpu"))
+    rank = kwargs.get('rank', 0)
+    if rank ==0 :
+        logger.info("======= Start training =======")
+
     # 定义损失函数和优化器
     # loss_fn = nn.BCELoss()
     # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
@@ -191,6 +200,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
     f1_metrics = BinaryF1Score(threshold=threshold).to(device)
 
     for epoch in tqdm(range(num_epochs)):
+        train_loader.set_epoch(epoch)
         total_loss, eval_loss = 0.0, 0.0
         train_graph_num_cnt = 0
         # train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
@@ -207,9 +217,10 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
         
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
+
             train_graph_num_cnt += len(batch_graphs.batch_num_nodes())
             # 打印形状以调试
-            # logger.info(f"Node features shape: {batch_graphs.edata['label'].shape}")
+            logger.debug(f"Node features shape: {batch_graphs.edata['label'].shape}")
             # logger.info(f"Node features shape: {batch_graphs.edata['label'].squeeze(1).shape}")
 
             # logger.info(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
@@ -232,11 +243,13 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             total_loss += loss.item()
             
             logger.debug("Metrics computing...")
-            metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist()) # FIXME: wrong train metrics if batchsize > 1
+            metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist(), device) # FIXME: wrong train metrics if batchsize > 1
             train_hit_rate = {k: train_hit_rate[k] + metrics[k] for k in metrics}
-            if verbose:
-                logger.info(f"Train Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
+            if verbose and rank==0:
+                logger.info(f"Train Epoch {epoch}-Batch {i+1}/{len(train_loader)}: Loss {loss.item()/len(batch_graphs.batch_num_nodes())}, Metrics {metrics}")
         
+        if rank != 0:
+            continue
         # evaluate
         model.eval()
         with torch.no_grad():
@@ -250,10 +263,10 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
                 logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
                 loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
                 eval_loss += loss.item()
-                metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
+                metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist(), device)
                 eval_hit_rate = {k: eval_hit_rate[k] + metrics[k] for k in metrics}
                 if verbose:
-                    logger.info(f"Valid Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
+                    logger.info(f"Valid Epoch {epoch}-Batch {i}/{len(valid_loader)}: Loss {loss.item()/len(batch_graphs.batch_num_nodes())}, Metrics {metrics}")
         
         train_hit_rate = {k: v / train_graph_num_cnt for k, v in train_hit_rate.items()}
         eval_hit_rate = {k: v / eval_graph_num_cnt for k, v in eval_hit_rate.items()}
@@ -269,12 +282,13 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
         logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_hit_rate}")
         logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
         # save the model
-        torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
+        torch.save(model.module.state_dict(), f"{output_dir}/model_{epoch}.pth")
         logger.info(f"Model saved at {output_dir}/model_{epoch}.pth")
 
     logger.info("======= Training finished =======")
 
 def test(model, test_loader, **kwargs):
+    device = kwargs.get("device", 0)
     logger.info("======= Start testing =======")
     threshold = kwargs.get('threshold', 0.5)
 
@@ -295,7 +309,7 @@ def test(model, test_loader, **kwargs):
             # # 根据non_seed_indices选出对应的logits和labels
             # non_seed_logits = logits.squeeze(1)[non_seed_indices]
             # non_seed_labels = batch_graphs.ndata['label'].float()[non_seed_indices]
-            metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
+            metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist(), device)
             # logger.info(f"Test Batch {i}: Metrics {metrics}")
             test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
         
@@ -303,6 +317,102 @@ def test(model, test_loader, **kwargs):
         logger.info(f"Test finished, Test Metrics {test_hit_rate}")
     
 
+def init_process_group(world_size, rank):
+    """
+        world_size: the number of processes
+        rank: the process ID, which should be an integer from 0 to world_size - 1
+    """
+    dist.init_process_group(
+        backend="nccl",  # change to 'nccl' for multiple GPUs
+        init_method="tcp://127.0.0.1:12345",
+        world_size=world_size,
+        rank=rank,
+    )
+
+def get_dataloaders(dataset_path: str, **kwargs):
+    debug = kwargs.get('debug', False)
+    train_batch_size = kwargs.get('train_batch_size', 8)
+    valid_batch_size = kwargs.get('valid_batch_size', 1)
+    test_batch_size = kwargs.get('test_batch_size', 1)
+
+    train_dataset = torch.load(os.path.join(dataset_path, 'train_dataset.pt'))
+    valid_dataset = torch.load(os.path.join(dataset_path, 'valid_dataset.pt'))
+    test_dataset = torch.load(os.path.join(dataset_path, 'test_dataset.pt'))
+    if debug:
+        train_dataset = train_dataset[:64]
+        valid_dataset = valid_dataset[:16]
+        test_dataset = test_dataset[:16]
+
+    # 使用 DataLoader 加载子集
+    # train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
+    # valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
+    # test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
+    train_loader = GraphDataLoader(
+        train_dataset, use_ddp=True, batch_size=train_batch_size, shuffle=True
+    )
+    valid_loader = GraphDataLoader(valid_dataset, batch_size=valid_batch_size)
+    test_loader = GraphDataLoader(test_dataset, batch_size=test_batch_size)
+    logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
+
+    return train_loader, valid_loader, test_loader
+
+def init_model(seed, device):
+    torch.manual_seed(seed)
+    model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
+    model = model.to(device)
+    logger.info(f"Model Parameters: {sum(p.numel() for p in model.parameters())}")
+    if device.type == "cpu":
+        model = DistributedDataParallel(model)
+    else:
+        model = DistributedDataParallel(
+            model, device_ids=[device], output_device=device
+        )
+
+    return model
+
+
+def train_parallel(rank, world_size, args):
+    # 初始化 W&B
+    if not args.debug and rank==0:
+        wandb.init(
+            project="code-context-model",
+            config=args,
+            job_type="training",
+        )
+
+    init_process_group(world_size, rank)
+    device_ids = args.devices.split(',')
+    logger.info(f"Process {rank} started, device_ids: {device_ids}")
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{device_ids[rank]}")
+        torch.cuda.set_device(device)
+    else:
+        device = torch.device("cpu")
+
+    train_loader, valid_loader, test_loader = get_dataloaders(
+        args.input_dir, 
+        debug=args.debug, 
+        train_batch_size=args.train_batch_size, 
+        valid_batch_size=args.valid_batch_size, 
+        test_batch_size=args.test_batch_size
+    )
+
+    # # 定义模型
+    model = init_model(args.seed, device)
+    train(
+        model=model, 
+        train_loader=train_loader, 
+        valid_loader=valid_loader, 
+        verbose=True, 
+        lr=args.lr,
+        num_epochs=args.num_epochs,
+        threshold=args.threshold,
+        output_dir=args.output_dir,
+        debug=args.debug,
+        device=device,
+        rank=rank
+    )
+    dist.destroy_process_group()
     
 
 if __name__ == "__main__":
@@ -310,7 +420,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # train args
     parser.add_argument('--do_train', action='store_true', help='train the model')
-    parser.add_argument('--device', type=int, default=1, help='device id')
+    parser.add_argument('--devices', type=str, default=1, help='device id')
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
     parser.add_argument('--embedding_dir', type=str, default='data', help='embedding directory')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
@@ -326,6 +436,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_model_pth', type=str, default='model_48.pth', help='test model path')
 
     parser.add_argument('--debug', action='store_true', help='debug mode')
+    global args
     args = parser.parse_args()
 
     args.output_dir = os.path.join(args.output_dir, f"{time.strftime('%m-%d-%H-%M')}")
@@ -334,14 +445,7 @@ if __name__ == "__main__":
     if args.debug:
         args.num_epochs = 1 
         args.test_model_pth = 'model_0.pth'
-    else:
-        wandb.init(project="code-context-model")
-        # 配置wandb
-        config = wandb.config
-        config.learning_rate = args.lr
-        config.batch_size = args.train_batch_size
-        config.epochs = args.num_epochs
-        config.device = args.device
+    
     if args.do_train:
         args.test_model_pth = os.path.join(args.output_dir, args.test_model_pth)   
     
@@ -349,55 +453,33 @@ if __name__ == "__main__":
     args_dict_str = '\n'.join([f"{k}: {v}" for k, v in vars(args).items()])
     logger.info(f"Arguments: \n{args_dict_str}")
 
-    global device
-    device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+    # global device
+    # device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
     # 设置随机种子
     set_seed(args.seed)
-    # 加载数据集
-    # xml_files = read_xml_dataset(args.input_dir)
-    # data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', device=device, debug=args.debug)
-    # # 切分数据集
-    # train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
-    train_dataset = torch.load(os.path.join(args.input_dir, 'train_dataset.pt'))
-    valid_dataset = torch.load(os.path.join(args.input_dir, 'valid_dataset.pt'))
-    test_dataset = torch.load(os.path.join(args.input_dir, 'test_dataset.pt'))
-    if args.debug:
-        train_dataset = train_dataset[:64]
-        valid_dataset = valid_dataset[:16]
-        test_dataset = test_dataset[:16]
-
-    # 使用 DataLoader 加载子集
-    train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
-    valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
-    test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
-    logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
-
-    # # 定义模型
-    model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
-    logger.info(f"Model Parameters: {sum(p.numel() for p in model.parameters())}")
-    model.to(device)
 
     if args.do_train:
-        train(
-            model=model, 
-            train_loader=train_loader, 
-            valid_loader=valid_loader, 
-            verbose=False, 
-            lr=args.lr,
-            num_epochs=args.num_epochs,
-            threshold=args.threshold,
-            output_dir=args.output_dir,
-            debug=args.debug
-        )
+        device_ids = args.devices.split(',')
+        mp.spawn(
+            train_parallel, 
+                args=(len(device_ids), args), 
+                nprocs=len(device_ids)
+            )
 
     if args.do_test:
+        test_dataset = torch.load(os.path.join(args.input_dir, 'test_dataset.pt'))
+        test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
+        model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
+        model.to(f"cuda:{args.devices.split(',')[0]}")
         logger.info(f"test model path: {args.test_model_pth}")
         model.load_state_dict(torch.load(args.test_model_pth))
+        device = torch.device(f"cuda:{args.devices.split(',')[0]}") if torch.cuda.is_available() else torch.device("cpu")
         test(
             model=model, 
             test_loader=test_loader, 
-            threshold=args.threshold
+            threshold=args.threshold,
+            device=device
         )
     
 
