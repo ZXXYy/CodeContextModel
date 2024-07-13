@@ -248,8 +248,6 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             if verbose and rank==0:
                 logger.info(f"Train Epoch {epoch}-Batch {i+1}/{len(train_loader)}: Loss {loss.item()/len(batch_graphs.batch_num_nodes())}, Metrics {metrics}")
         
-        if rank != 0:
-            continue
         # evaluate
         model.eval()
         with torch.no_grad():
@@ -265,11 +263,45 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
                 eval_loss += loss.item()
                 metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist(), device)
                 eval_hit_rate = {k: eval_hit_rate[k] + metrics[k] for k in metrics}
-                if verbose:
-                    logger.info(f"Valid Epoch {epoch}-Batch {i}/{len(valid_loader)}: Loss {loss.item()/len(batch_graphs.batch_num_nodes())}, Metrics {metrics}")
+                # if verbose:
+                #     logger.info(f"Valid Epoch {epoch}-Batch {i}/{len(valid_loader)}: Loss {loss.item()/len(batch_graphs.batch_num_nodes())}, Metrics {metrics}")
         
         train_hit_rate = {k: v / train_graph_num_cnt for k, v in train_hit_rate.items()}
         eval_hit_rate = {k: v / eval_graph_num_cnt for k, v in eval_hit_rate.items()}
+
+        # Merge all loss and hit_rate from different device
+        total_loss = torch.tensor(total_loss, device=device)
+        eval_loss = torch.tensor(eval_loss, device=device)
+        dist.all_reduce(total_loss, op=dist.ReduceOp.SUM)
+        dist.all_reduce(eval_loss, op=dist.ReduceOp.SUM)
+
+        for i in range(1, 6):
+            train_hit_rate[f'top{i}_hit'] = torch.tensor(train_hit_rate[f'top{i}_hit'], device=device)
+            eval_hit_rate[f'top{i}_hit'] = torch.tensor(eval_hit_rate[f'top{i}_hit'], device=device)
+        for i in range(1, 6):
+            # use mean to calculate the hit rate
+            dist.all_reduce(train_hit_rate[f'top{i}_hit'], op=dist.ReduceOp.SUM)
+            dist.all_reduce(eval_hit_rate[f'top{i}_hit'], op=dist.ReduceOp.SUM)
+        
+
+        # only rank 0 process record the metrics and save the modelsx
+        if rank != 0:
+            continue
+        # save the model
+        torch.save(model.module.state_dict(), f"{output_dir}/model_{epoch}.pth")
+        logger.info(f"Model saved at {output_dir}/model_{epoch}.pth")
+
+        # echo total loss and averaged hit rate
+        total_loss = total_loss.item()
+        eval_loss = eval_loss.item()
+        train_hit_rate = {k: v.item() / dist.get_world_size() for k, v in train_hit_rate.items()}
+        eval_hit_rate = {k: v.item() / dist.get_world_size() for k, v in eval_hit_rate.items()}
+        logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_hit_rate}")
+        logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
+
+        # don't record metrics in debug mode
+        if debug:
+            continue
         wandb_log = {
             "Epoch": epoch,
             "Train Loss": total_loss,
@@ -277,13 +309,8 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
         }
         wandb_log.update(train_hit_rate)
         wandb_log.update(eval_hit_rate)
-        if not debug:
-            wandb.log(wandb_log)
-        logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_hit_rate}")
-        logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
-        # save the model
-        torch.save(model.module.state_dict(), f"{output_dir}/model_{epoch}.pth")
-        logger.info(f"Model saved at {output_dir}/model_{epoch}.pth")
+        wandb.log(wandb_log)
+
 
     logger.info("======= Training finished =======")
 
@@ -317,44 +344,41 @@ def test(model, test_loader, **kwargs):
         logger.info(f"Test finished, Test Metrics {test_hit_rate}")
     
 
-def init_process_group(world_size, rank):
+def init_process_group(world_size, rank, port):
     """
         world_size: the number of processes
         rank: the process ID, which should be an integer from 0 to world_size - 1
     """
     dist.init_process_group(
         backend="nccl",  # change to 'nccl' for multiple GPUs
-        init_method="tcp://127.0.0.1:12345",
-        world_size=world_size,
+        init_method=f"tcp://127.0.0.1:{port}",
+        world_size=world_size,  
         rank=rank,
     )
 
 def get_dataloaders(dataset_path: str, **kwargs):
     debug = kwargs.get('debug', False)
     train_batch_size = kwargs.get('train_batch_size', 8)
-    valid_batch_size = kwargs.get('valid_batch_size', 1)
-    test_batch_size = kwargs.get('test_batch_size', 1)
+    valid_batch_size = kwargs.get('valid_batch_size', 8)
+    # test_batch_size = kwargs.get('test_batch_size', 1)
 
     train_dataset = torch.load(os.path.join(dataset_path, 'train_dataset.pt'))
     valid_dataset = torch.load(os.path.join(dataset_path, 'valid_dataset.pt'))
-    test_dataset = torch.load(os.path.join(dataset_path, 'test_dataset.pt'))
     if debug:
         train_dataset = train_dataset[:64]
-        valid_dataset = valid_dataset[:16]
-        test_dataset = test_dataset[:16]
+        valid_dataset = valid_dataset[:64]
+        # test_dataset = test_dataset[:16]
 
     # 使用 DataLoader 加载子集
     # train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
     # valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
     # test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
-    train_loader = GraphDataLoader(
-        train_dataset, use_ddp=True, batch_size=train_batch_size, shuffle=True
-    )
-    valid_loader = GraphDataLoader(valid_dataset, batch_size=valid_batch_size)
-    test_loader = GraphDataLoader(test_dataset, batch_size=test_batch_size)
-    logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
+    train_loader = GraphDataLoader(train_dataset, use_ddp=True, batch_size=train_batch_size, shuffle=True)
+    valid_loader = GraphDataLoader(valid_dataset, use_ddp=True, batch_size=valid_batch_size)
+    # test_loader = GraphDataLoader(test_dataset, batch_size=test_batch_size)
+    logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}") # Test: {len(test_dataset)}")
 
-    return train_loader, valid_loader, test_loader
+    return train_loader, valid_loader
 
 def init_model(seed, device):
     torch.manual_seed(seed)
@@ -380,7 +404,7 @@ def train_parallel(rank, world_size, args):
             job_type="training",
         )
 
-    init_process_group(world_size, rank)
+    init_process_group(world_size, rank, port=args.port)
     device_ids = args.devices.split(',')
     logger.info(f"Process {rank} started, device_ids: {device_ids}")
     if torch.cuda.is_available():
@@ -389,12 +413,12 @@ def train_parallel(rank, world_size, args):
     else:
         device = torch.device("cpu")
 
-    train_loader, valid_loader, test_loader = get_dataloaders(
+    train_loader, valid_loader = get_dataloaders(
         args.input_dir, 
         debug=args.debug, 
         train_batch_size=args.train_batch_size, 
         valid_batch_size=args.valid_batch_size, 
-        test_batch_size=args.test_batch_size
+        # test_batch_size=args.test_batch_size
     )
 
     # # 定义模型
@@ -458,6 +482,8 @@ if __name__ == "__main__":
 
     # 设置随机种子
     set_seed(args.seed)
+    # set args.port to random value
+    args.port = random.randint(10000, 20000)
 
     if args.do_train:
         device_ids = args.devices.split(',')

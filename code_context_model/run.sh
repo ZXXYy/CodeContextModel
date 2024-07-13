@@ -1,7 +1,7 @@
 # code_context_model/run.sh
 python code_context_model/train.py \
 --do_train \
---device 2,3,4,5 \
+--device 6,7,8,9 \
 --train_batch_size 64 \
 --valid_batch_size 16 \
 --test_batch_size 16 \
@@ -12,7 +12,8 @@ python code_context_model/train.py \
 --lr 1e-6 \
 --threshold 0.5 \
 --seed 42 \
---do_test
+--do_test \
+--debug
 
 # debug
 # python code_context_model/train.py \
