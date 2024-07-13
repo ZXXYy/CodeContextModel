@@ -200,7 +200,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
     f1_metrics = BinaryF1Score(threshold=threshold).to(device)
 
     for epoch in tqdm(range(num_epochs)):
-        train_loader.set_epoch(epoch)
+        train_loader.set_epoch(epoch), valid_loader.set_epoch(epoch)
         total_loss, eval_loss = 0.0, 0.0
         train_graph_num_cnt = 0
         # train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
@@ -294,8 +294,8 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
         # echo total loss and averaged hit rate
         total_loss = total_loss.item()
         eval_loss = eval_loss.item()
-        train_hit_rate = {k: v.item() / dist.get_world_size() for k, v in train_hit_rate.items()}
-        eval_hit_rate = {k: v.item() / dist.get_world_size() for k, v in eval_hit_rate.items()}
+        train_hit_rate = {"train"+k: v.item() / dist.get_world_size() for k, v in train_hit_rate.items()}
+        eval_hit_rate = {"eval"+k: v.item() / dist.get_world_size() for k, v in eval_hit_rate.items()}
         logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_hit_rate}")
         logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
 
@@ -483,7 +483,7 @@ if __name__ == "__main__":
     # 设置随机种子
     set_seed(args.seed)
     # set args.port to random value
-    args.port = random.randint(10000, 20000)
+    args.port = 20001 + random.randint(0, 1000)
 
     if args.do_train:
         device_ids = args.devices.split(',')

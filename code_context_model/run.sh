@@ -9,11 +9,10 @@ python code_context_model/train.py \
 --embedding_dir "/data0/xiaoyez/CodeContextModel/bge_embedding_results2" \
 --output_dir "/data0/xiaoyez/CodeContextModel/model_output" \
 --num_epochs 50 \
---lr 1e-6 \
+--lr 1e-5 \
 --threshold 0.5 \
 --seed 42 \
---do_test \
---debug
+--do_test
 
 # debug
 # python code_context_model/train.py \
