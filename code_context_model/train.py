@@ -134,16 +134,15 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         negative_indices = (labels == 0).nonzero().view(-1)
         embeddings = logits
         logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
-        
+        # 定义 margin
+        neg_margin = 0.0
+        pos_margin = 1.0
         if len(positive_indices) > 0:
             # 生成所有可能的 (seed_index, positive_index) 组合对
             seed_positive_pairs = torch.cartesian_prod(seed_indices, positive_indices)
             # 提取组合对的嵌入
             seed_pair_embeddings = embeddings[seed_positive_pairs[:, 0]]
             positive_pair_embeddings = embeddings[seed_positive_pairs[:, 1]]
-            # 定义 margin
-            neg_margin = 0.0
-            pos_margin = 1.0
             # 计算正样本对之间的欧氏距离
             # positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
             positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
@@ -218,13 +217,13 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
             batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
             batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
-            logger.info("Model Forwarding...")
+            # logger.info("Model Forwarding...")
             logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
             # if epoch > 10:
             #     logger.info(f"Logits: {logits}")
             #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
             # loss = loss_fn(anchor_embedding, positive_embedding, negative_embedding)
-            logger.info("Loss computing...")
+            # logger.info("Loss computing...")
             loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
 
             optimizer.zero_grad()
@@ -232,7 +231,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             optimizer.step()
             total_loss += loss.item()
             
-            logger.info("Metrics computing...")
+            # logger.info("Metrics computing...")
             metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist()) # FIXME: wrong train metrics if batchsize > 1
             train_hit_rate = {k: train_hit_rate[k] + metrics[k] for k in metrics}
             if verbose:
@@ -256,8 +255,8 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
                 if verbose:
                     logger.info(f"Valid Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
         
-        train_hit_rate = {k: v / train_graph_num_cnt for k, v in train_hit_rate.items()}
-        eval_hit_rate = {k: v / eval_graph_num_cnt for k, v in eval_hit_rate.items()}
+        train_hit_rate = {"train_"+k: v / train_graph_num_cnt for k, v in train_hit_rate.items()}
+        eval_hit_rate = {"eval_"+k: v / eval_graph_num_cnt for k, v in eval_hit_rate.items()}
         wandb_log = {
             "Epoch": epoch,
             "Train Loss": total_loss,
