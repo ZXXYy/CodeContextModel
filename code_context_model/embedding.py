@@ -184,7 +184,7 @@ def embedding_inference(input_dir, output_dir, debug=False):
     for i in range(10):
         if i == 6:
             continue
-        models.append(CodeBertEmbedding(device=i))
+        models.append(BgeEmbedding(device=i))
     
     # read data
     codes = read_data(input_dir, output_dir, f"{models[0]}")

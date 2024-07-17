@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryF1Score, BinaryPrecision, BinaryRecall
 
 from code_context_model.build_dataset import ExpandGraphDataset, split_dataset
-from code_context_model.gnn import RGCN
+from code_context_model.gnn import RGCN, GCN, GAT, GraphSage
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
@@ -238,7 +238,11 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             eval_hit_rate[f'top{i}_hit'] = 0
             # eval_hit_rate[f'top{i}_precision'] = 0
             # eval_hit_rate[f'top{i}_recall'] = 0
-        
+        train_hit_rate['mrr'] = 0
+        train_hit_rate['map'] = 0
+        eval_hit_rate['mrr'] = 0
+        eval_hit_rate['map'] = 0
+
         model.train()    
         for i, batch_graphs in enumerate(train_loader):
             train_graph_num_cnt += len(batch_graphs.batch_num_nodes())
@@ -356,6 +360,8 @@ if __name__ == "__main__":
     parser.add_argument('--threshold', type=float, default=0.5, help='threshold for binary classification')
     parser.add_argument('--output_dir', type=str, default='output', help='output directory')
     parser.add_argument('--seed', type=int, default=42, help='random seed')
+    parser.add_argument('--model', type=str, default='rgcn', help='training model')
+
     # test args
     parser.add_argument('--do_test', action='store_true', help='test the model')
     parser.add_argument('--test_batch_size', type=int, default=1, help='test batch size')
@@ -410,7 +416,17 @@ if __name__ == "__main__":
     logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
 
     # # 定义模型
-    model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
+    if args.model == 'rgcn':
+        model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
+    elif args.model == 'gat':
+        model = GAT(in_feat=1024, h_feat=1024, out_feat=1, num_heads=4)
+    elif args.model == 'gcn':
+        model = GCN(in_feat=1024, h_feat=1024, out_feat=1)
+    elif args.model == 'graphsage':
+        model = GraphSage(in_feat=1024, h_feat=1024, out_feat=1)
+    else:
+        raise ValueError(f"Model {args.model} not supported")
+    
     logger.info(f"Model Parameters: {sum(p.numel() for p in model.parameters())}")
     model.to(device)
 
