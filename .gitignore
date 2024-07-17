@@ -10,3 +10,5 @@ bge_embedding_results2
 *.pt
 *.data
 *.tsv
+*.pkl
+codebert_base/

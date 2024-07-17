@@ -23,21 +23,7 @@ class TextEmbedding():
     def __init__(self):
         self.tokenizer = None
         self.model = None
-    def get_embedding(self, input_texts: str) -> torch.Tensor:
-        pass
-
-
-class BgeEmbedding(TextEmbedding):
-    def __init__(self, device):
-        self.tokenizer = AutoTokenizer.from_pretrained('BAAI/bge-large-en-v1.5')
-        self.model = AutoModel.from_pretrained('BAAI/bge-large-en-v1.5', revision="refs/pr/13")
-        self.device = torch.device(f"cuda:{device}" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
-        logger.info(f"BgeEmbedding initialized in {self.device}")
     
-    def __str__(self):
-        return "BgeEmbedding"
-
     def get_embedding(self, input_texts: list, batch_size: int = 32) -> torch.Tensor:        
         # Function to process a single batch and get embeddings
         def process_batch(batch_texts):
@@ -68,6 +54,34 @@ class BgeEmbedding(TextEmbedding):
         return all_embeddings.tolist()
 
 
+
+
+class BgeEmbedding(TextEmbedding):
+    def __init__(self, device):
+        self.tokenizer = AutoTokenizer.from_pretrained('BAAI/bge-large-en-v1.5')
+        self.model = AutoModel.from_pretrained('BAAI/bge-large-en-v1.5', revision="refs/pr/13")
+        self.device = torch.device(f"cuda:{device}" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+        logger.info(f"BgeEmbedding initialized in {self.device}")
+    
+    def __str__(self):
+        return "BgeEmbedding"
+
+    
+class CodeBertEmbedding(TextEmbedding):
+    def __init__(self, device):
+        self.tokenizer = AutoTokenizer.from_pretrained("/data0/xiaoyez/CodeContextModel/code_context_model/codebert_base")
+        self.model = AutoModel.from_pretrained("/data0/xiaoyez/CodeContextModel/code_context_model/codebert_base")
+        self.device = torch.device(f"cuda:{device}" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+        logger.info(f"CodeBertEmbedding initialized in {self.device}")
+    
+    def __str__(self):
+        return "CodeBertEmbedding"
+    
+
+
+   
 def get_nodes_text(expand_graph_path: str) -> pd.DataFrame:
     tree = ET.parse(expand_graph_path)
     root = tree.getroot()
@@ -168,7 +182,9 @@ def embedding_inference(input_dir, output_dir, debug=False):
     # init models
     models = []
     for i in range(10):
-        models.append(BgeEmbedding(device=i))
+        if i == 6:
+            continue
+        models.append(CodeBertEmbedding(device=i))
     
     # read data
     codes = read_data(input_dir, output_dir, f"{models[0]}")
@@ -210,6 +226,9 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default='data', help='output directory')
     parser.add_argument('--debug', action='store_true', help='debug mode')
     args = parser.parse_args()
+
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
 
     multiprocessing.set_start_method('spawn')
     embedding_inference(args.input_dir, args.output_dir, args.debug)
