@@ -221,7 +221,7 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
             "kind": "variable",
             "origin": "1" if variable_origin else "0",
             "seed": "1" if variable_seed else "0",
-            "ref_id": f"{step}_step_{expanded_model_path.split('/')[-1].split('_')[2]}_cc_collapsed_variable_{i}",
+            "ref_id": f"{step}_step_collapsed_variable_{i}",
         })
         vertices = root.find('.//vertices')
         vertices.append(new_variable)
@@ -261,10 +261,8 @@ def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
             update_edges(start_edges, variable_id)
             update_edges(end_edges, variable_id)
         new_variable_id += 1
-    if not os.path.exists(f"{outdir}/{step}_step_collaspe"):
-        os.makedirs(f"{outdir}/{step}_step_collaspe")
     # 5. 写入文件
-    tree.write(f"{outdir}/{step}_step_collaspe/collapse_{expanded_model_path.split('/')[-1]}", encoding='utf-8', xml_declaration=True)
+    tree.write(f"{outdir}/collapse_{expanded_model_path.split('/')[-1]}", encoding='utf-8', xml_declaration=True)
     df_code.to_csv(f"{outdir}/my_java_codes_collapse.tsv", sep='\t', index=False)
             
 
@@ -308,7 +306,7 @@ def generate_seed_expanded_graphs(input_path, step=1):
 def generate_variable_collapsed_graphs(input_path, step=1):
     """
     合并变量结点
-    x_step_seeds_cc/x_step_y_cc_seeds_expanded_model.xml -> x_step_seeds_cc/collapsed_x_step_y_cc_seeds_expanded_model.xml
+    x_step_seeds_expanded_model.xml -> collapse_x_step_seeds_expanded_model.xml
     my_java_codes.tsv -> my_java_codes_collapse.tsv
     """
     context_models = os.listdir(input_path)
@@ -317,19 +315,13 @@ def generate_variable_collapsed_graphs(input_path, step=1):
         expanded_model_dir = f"{input_path}/{context_model}"
         model_dir = context_model
         outdir = f"{input_path}/{context_model}/"
-        code_path = f"{input_path}/{context_model}/my_java_codes.tsv"
-        if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse_all_ccs_in_one.tsv"):
-            code_path = f"{input_path}/{context_model}/my_java_codes_collapse_all_ccs_in_one.tsv"
 
-        expanded_model_dir = os.path.join(expanded_model_dir, f"{step}_step_seeds_cc")
-        if not os.path.exists(expanded_model_dir):
-            logger.error(f"{expanded_model_dir} not exists")
-            continue
-        for expanded_model_path in os.listdir(expanded_model_dir):
-            if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse.tsv"):
-                code_path = f"{input_path}/{context_model}/my_java_codes_collapse.tsv"  
-            expanded_model_path = os.path.join(expanded_model_dir, expanded_model_path)
-            collaspe_variables(expanded_model_path, code_path=code_path, model_dir=model_dir, outdir=outdir, step=step)
+        code_path = f"{input_path}/{context_model}/my_java_codes.tsv"
+        if os.path.exists(f"{input_path}/{context_model}/my_java_codes_collapse.tsv"):
+            code_path = f"{input_path}/{context_model}/my_java_codes_collapse.tsv"
+
+        expanded_model_path = os.path.join(expanded_model_dir, f"{step}_step_seeds_expanded_model.xml")
+        collaspe_variables(expanded_model_path, code_path=code_path, model_dir=model_dir, outdir=outdir, step=step)
 
         # for expanded_model_path in os.listdir(expanded_model_dir):
         #     expanded_model_path = os.path.join(expanded_model_dir, expanded_model_path)
@@ -422,6 +414,9 @@ def clearup(input_path):
             collapse_model_dir = f"{input_path}/{context_model}/{step}_step_collaspe"
             if os.path.exists(collapse_model_dir):
                 shutil.rmtree(collapse_model_dir)
+            cc_model_dir = f"{input_path}/{context_model}/{step}_step_seeds_cc"
+            if os.path.exists(cc_model_dir):
+                shutil.rmtree(cc_model_dir)
             seed_expanded_file = f"{input_path}/{context_model}/{step}_step_seeds_expanded_model.xml"
             if os.path.exists(seed_expanded_file):
                 os.remove(seed_expanded_file)
@@ -446,17 +441,18 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.action == 'generate':
-        logger.info(f"=====start to generate big graphs from {args.input_dir}=====")
-        generate_big_graphs(args.input_dir, args.step)
-        logger.info(f"=====Big graphs generated successfully=====")
+        # logger.info(f"=====start to generate big graphs from {args.input_dir}=====")
+        # generate_big_graphs(args.input_dir, args.step)
+        # logger.info(f"=====Big graphs generated successfully=====")
         
-        logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
-        generate_seed_expanded_graphs(args.input_dir, args.step)
-        logger.info(f"=====Seed expanded graphs generated successfully=====")
+        # logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
+        # generate_seed_expanded_graphs(args.input_dir, args.step)
+        # logger.info(f"=====Seed expanded graphs generated successfully=====")
 
         logger.info(f"=====start to generate collapsed variable graphs from {args.input_dir}=====")
         generate_variable_collapsed_graphs(args.input_dir, args.step)
         logger.info(f"=====Collasped variable graphs generated successfully=====")
+
     elif args.action == 'statistics':
         # 使用下述代码获取数据集中变量/函数/类的统计信息
         # get_statistics('/Users/zhengxiaoye/Desktop/codeContextGNN/CodeContextModel/data')

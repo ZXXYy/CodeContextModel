@@ -65,6 +65,30 @@ def euclidean_distance(x1, x2):
     # 计算欧式距离
     return torch.dist(x1, x2).item()
 
+def compute_mrr(non_seed_indices, labels, similarities):
+    mrr = 0
+    topk = min(100, len(non_seed_indices))
+    topk_indices = torch.topk(similarities, topk).indices
+    for i, item in enumerate(topk_indices):
+        idx = non_seed_indices[topk_indices[i]]
+        if labels[idx] == 1:
+            mrr = 1 / (i + 1)
+            return {'MRR': mrr}
+    return {'MRR': 0}
+
+def compute_map(non_seed_indices, labels, similarities, step, topk=5):
+    MAP = 0
+    positive_cnt = 0
+    topk = min(topk, len(non_seed_indices))
+    topk_indices = torch.topk(similarities, topk).indices
+
+    for i, item in enumerate(topk_indices):
+        idx = non_seed_indices[topk_indices[i]]
+        if labels[idx] == 1:
+            positive_cnt += 1
+            MAP += positive_cnt / (i + 1)
+    MAP = MAP / step
+    return {'MAP': MAP}
 
 def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     batch_size = len(batch_num_nodes)
@@ -72,6 +96,8 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     total_hit = {}
     for i in range(1, 6):
         total_hit[f'top{i}_hit'] = 0
+    total_hit['mrr'] = 0
+    total_hit['map'] = 0
         # total_hit[f'top{i}_precision'] = 0
         # total_hit[f'top{i}_recall'] = 0
 
@@ -111,6 +137,14 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
             # total_hit[f"top{temp}_precision"] += (hit+len(seed_indices)) / (topk+len(seed_indices))
             # total_hit[f"top{temp}_recall"] += (hit+len(seed_indices)) / (len(seed_indices)+len(positive_indices))
             total_hit[f"top{temp}_hit"] += 1 if hit > 0 else 0
+
+        mrr = compute_mrr(non_seed_indices, labels, similarities)
+
+        step = len(positive_indices) if len(positive_indices) > 0 else 2
+        map_metrics = compute_map(non_seed_indices, labels, similarities, step)
+
+        total_hit['mrr'] += mrr['MRR']
+        total_hit['map'] += map_metrics['MAP']
         start_idx += batch_num_nodes[k]
 
     return total_hit
@@ -285,6 +319,8 @@ def test(model, test_loader, **kwargs):
             test_hit_rate[f'top{i}_hit'] = 0
             test_hit_rate[f'top{i}_precision'] = 0
             test_hit_rate[f'top{i}_recall'] = 0
+        test_hit_rate['mrr'] = 0
+        test_hit_rate['map'] = 0
         for i, batch_graphs in enumerate(test_loader):
             batch_graphs = batch_graphs.to(device)
             batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
@@ -334,7 +370,7 @@ if __name__ == "__main__":
     if args.debug:
         args.num_epochs = 1 
         args.test_model_pth = 'model_0.pth'
-    else:
+    elif args.do_train:
         wandb.init(project="code-context-model")
         # 配置wandb
         config = wandb.config
