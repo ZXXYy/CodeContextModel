@@ -132,6 +132,11 @@ class ExpandGraphDataset(DGLDataset):
     def __len__(self):
         return len(self.graphs)
     
+    def __add__(self, other):
+        self.graphs += other.graphs
+        return self
+    
+    
 def split_dataset(dataset, train_ratio=0.9):
     # 生成数据集索引
     indices = np.arange(len(dataset))
@@ -166,6 +171,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
     parser.add_argument('--embedding_dir', type=str, default='data', help='embedding directory')
+    parser.add_argument('--embedding_model', type=str, default='BgeEmbedding', help='embedding model')
     parser.add_argument('--output_dir', type=str, default='dataset', help='dataset output directory')
     parser.add_argument('--step', type=int, help='generate dataset for specific step')
     parser.add_argument('--all_step', action='store_true', help='generate all steps data in one dataset')
@@ -178,8 +184,8 @@ if __name__ == '__main__':
     train_xml_files = read_xml_dataset(args.input_dir, "train", steps)
     test_xml_files = read_xml_dataset(args.input_dir, "test", steps)
 
-    train_data_builder = ExpandGraphDataset(xml_files=train_xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', debug=args.debug)
-    test_dataset = ExpandGraphDataset(xml_files=test_xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', debug=args.debug)
+    train_data_builder = ExpandGraphDataset(xml_files=train_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
+    test_dataset = ExpandGraphDataset(xml_files=test_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
 
     train_dataset, valid_dataset = split_dataset(train_data_builder)
 

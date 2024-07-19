@@ -181,9 +181,7 @@ def write_to_file(dataset):
 def embedding_inference(input_dir, output_dir, debug=False):
     # init models
     models = []
-    for i in range(10):
-        if i == 6:
-            continue
+    for i in [5,7]:
         models.append(BgeEmbedding(device=i))
     
     # read data

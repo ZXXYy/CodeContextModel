@@ -351,7 +351,7 @@ if __name__ == "__main__":
     # train args
     parser.add_argument('--do_train', action='store_true', help='train the model')
     parser.add_argument('--device', type=int, default=1, help='device id')
-    parser.add_argument('--input_dir', type=str, default='data', help='input directory')
+    parser.add_argument('--input_dirs', type=str, nargs='+', default='data', help='input directories')
     parser.add_argument('--embedding_dir', type=str, default='data', help='embedding directory')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
     parser.add_argument('--train_batch_size', type=int, default=1, help='train batch size')
@@ -401,13 +401,19 @@ if __name__ == "__main__":
     # data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', device=device, debug=args.debug)
     # # 切分数据集
     # train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
-    train_dataset = torch.load(os.path.join(args.input_dir, 'train_dataset.pt'))
-    valid_dataset = torch.load(os.path.join(args.input_dir, 'valid_dataset.pt'))
-    test_dataset = torch.load(os.path.join(args.input_dir, 'test_dataset.pt'))
+    train_dataset = torch.load(os.path.join(args.input_dirs[0], 'train_dataset.pt'))
+    valid_dataset = torch.load(os.path.join(args.input_dirs[0], 'valid_dataset.pt'))
+    test_dataset = torch.load(os.path.join(args.input_dirs[0], 'test_dataset.pt'))
+
+    for i in range(1, len(args.input_dirs)):
+        train_dataset = train_dataset + torch.load(os.path.join(args.input_dirs[i], 'train_dataset.pt'))
+        valid_dataset = valid_dataset + torch.load(os.path.join(args.input_dirs[i], 'valid_dataset.pt'))
+        test_dataset = test_dataset + torch.load(os.path.join(args.input_dirs[i], 'test_dataset.pt'))
+
     if args.debug:
-        train_dataset = train_dataset[:64]
-        valid_dataset = valid_dataset[:16]
-        test_dataset = test_dataset[:16]
+        train_dataset = [train_dataset[i] for i in list(range(64))]  
+        valid_dataset = [valid_dataset[i] for i in list(range(16))] 
+        test_dataset = [test_dataset[i] for i in list(range(16))] 
 
     # 使用 DataLoader 加载子集
     train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
@@ -416,14 +422,17 @@ if __name__ == "__main__":
     logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
 
     # # 定义模型
+    num_layers = 1024 # bge embedding dims
+    if 'codebert' in args.embedding_dir:
+        num_layers = 768
     if args.model == 'rgcn':
-        model = RGCN(in_feat=1024, h_feat=1024, out_feat=1, num_rels=8)
+        model = RGCN(in_feat=num_layers, h_feat=num_layers, out_feat=1, num_rels=8)
     elif args.model == 'gat':
-        model = GAT(in_feat=1024, h_feat=1024, out_feat=1, num_heads=4)
+        model = GAT(in_feat=num_layers, h_feat=num_layers, out_feat=1, num_heads=4)
     elif args.model == 'gcn':
-        model = GCN(in_feat=1024, h_feat=1024, out_feat=1)
+        model = GCN(in_feat=num_layers, h_feat=num_layers, out_feat=1)
     elif args.model == 'graphsage':
-        model = GraphSage(in_feat=1024, h_feat=1024, out_feat=1)
+        model = GraphSage(in_feat=num_layers, h_feat=num_layers, out_feat=1)
     else:
         raise ValueError(f"Model {args.model} not supported")
     

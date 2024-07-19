@@ -163,9 +163,7 @@ def generate_expanded_graph_from_seed(root, cc_id, seeds, outdir, steps=1):
     # write new graph to file
     logger.debug(f"new_nodes: {len(new_nodes)}, new_edges: {len(new_edges)}")
     new_tree = form_expand_graph(new_nodes, new_edges, root)
-    if not os.path.exists(f"{outdir}/{steps}_step_seeds_cc"):
-        os.makedirs(f"{outdir}/{steps}_step_seeds_cc")
-    new_tree.write(f"{outdir}/{steps}_step_seeds_cc/{steps}_step_{cc_id}_cc_seeds_expanded_model.xml", encoding='utf-8', xml_declaration=True)
+    new_tree.write(f"{outdir}/{steps}_step_seeds_expanded_model.xml", encoding='utf-8', xml_declaration=True)
 
 def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
     if not os.path.exists(expanded_model_path):
@@ -441,13 +439,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.action == 'generate':
-        # logger.info(f"=====start to generate big graphs from {args.input_dir}=====")
-        # generate_big_graphs(args.input_dir, args.step)
-        # logger.info(f"=====Big graphs generated successfully=====")
+        logger.info(f"=====start to generate big graphs from {args.input_dir}=====")
+        generate_big_graphs(args.input_dir, args.step)
+        logger.info(f"=====Big graphs generated successfully=====")
         
-        # logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
-        # generate_seed_expanded_graphs(args.input_dir, args.step)
-        # logger.info(f"=====Seed expanded graphs generated successfully=====")
+        logger.info(f"=====start to generate seed expanded graphs from {args.input_dir}=====")
+        generate_seed_expanded_graphs(args.input_dir, args.step)
+        logger.info(f"=====Seed expanded graphs generated successfully=====")
 
         logger.info(f"=====start to generate collapsed variable graphs from {args.input_dir}=====")
         generate_variable_collapsed_graphs(args.input_dir, args.step)
