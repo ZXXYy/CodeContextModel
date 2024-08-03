@@ -34,8 +34,8 @@ class RGCN(nn.Module):
         self.conv_layers.append(RelGraphConv(in_feat, h_feat, num_rels, regularizer='basis', num_bases=4))
         for i in range(gnn_layers - 1):
             self.conv_layers.append(RelGraphConv(h_feat, h_feat, num_rels, regularizer='basis', num_bases=4))
-        self.mlp = MLP(h_feat, h_feat, out_feat)       
-
+        # self.mlp = MLP(h_feat, h_feat, out_feat)      
+        
         self._initialize_parameters() 
 
     def _initialize_parameters(self):

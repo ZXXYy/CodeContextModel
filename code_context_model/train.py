@@ -24,6 +24,9 @@ from code_context_model.gnn import RGCN, GCN, GAT, GraphSage
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
 
+TOPK = 100
+CASE_NOT_TOPK_HIT = []
+
 # handle the exit event
 def exit_handler():
     # wandb finish 
@@ -94,7 +97,7 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     batch_size = len(batch_num_nodes)
     start_idx = 0
     total_hit = {}
-    for i in range(1, 6):
+    for i in range(1, TOPK+1):
         total_hit[f'top{i}_hit'] = 0
     total_hit['mrr'] = 0
     total_hit['map'] = 0
@@ -123,7 +126,7 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
         logger.debug(f"Summed similarities shape: {similarities.shape}")
         logger.debug(f"Similarities: {similarities}")
         # find top3 similar embeddings
-        for topk in range(1,6):
+        for topk in range(1, TOPK+1):
             temp = topk
             topk = min(topk, len(non_seed_indices))
             topk_indices = torch.topk(similarities, topk).indices
@@ -321,7 +324,7 @@ def test(model, test_loader, **kwargs):
     model.eval()
     with torch.no_grad():
         test_hit_rate = {}
-        for i in range(1, 6):
+        for i in range(1, TOPK+1):
             test_hit_rate[f'top{i}_hit'] = 0
             test_hit_rate[f'top{i}_precision'] = 0
             test_hit_rate[f'top{i}_recall'] = 0
@@ -338,6 +341,9 @@ def test(model, test_loader, **kwargs):
             # non_seed_logits = logits.squeeze(1)[non_seed_indices]
             # non_seed_labels = batch_graphs.ndata['label'].float()[non_seed_indices]
             metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
+            if metrics[f"top{TOPK}_hit"] == 0:
+                CASE_NOT_TOPK_HIT.append(i)
+                logger.info(f"{i}: #nodes={batch_graphs.ndata['feat'].shape} #edges={batch_graphs.edata['label'].shape}")
             # logger.info(f"Test Batch {i}: Metrics {metrics}")
             test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
         
@@ -412,6 +418,13 @@ if __name__ == "__main__":
     test_dataset = torch.load(os.path.join(args.input_dirs[0], 'test_dataset.pt'))
     # test_dataset = valid_dataset + train_dataset
 
+    # for i, data in enumerate(test_dataset):
+    #     graph, xml_file = data
+    #     # if i in [48, 50, 188, 192, 270, 312, 318, 334, 478, 529]:
+    #     if i in [152, 188, 270, 478, 529]:
+    #         logger.info(graph.ndata['feat'].shape)
+    #         logger.info(xml_file)
+
     for i in range(1, len(args.input_dirs)):
         train_dataset = train_dataset + torch.load(os.path.join(args.input_dirs[i], 'train_dataset.pt'))
         valid_dataset = valid_dataset + torch.load(os.path.join(args.input_dirs[i], 'valid_dataset.pt'))
@@ -425,7 +438,7 @@ if __name__ == "__main__":
     # 使用 DataLoader 加载子集
     train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
     valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
-    test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=True, collate_fn=dgl.batch)
+    test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=False, collate_fn=dgl.batch)
     logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
 
     # # 定义模型
@@ -462,12 +475,29 @@ if __name__ == "__main__":
 
     if args.do_test:
         logger.info(f"test model path: {args.test_model_pth}")
-        model.load_state_dict(torch.load(args.test_model_pth))
+        old_state_dict = torch.load(args.test_model_pth)
+        mapping = {
+            'conv1': 'conv_layers.0',
+            'conv2': 'conv_layers.1',
+            'conv3': 'conv_layers.2'
+        }
+        new_state_dict = {}
+        for old_key, value in old_state_dict.items():
+            for old_prefix, new_prefix in mapping.items():
+                if old_key.startswith(old_prefix):
+                    new_key = old_key.replace(old_prefix, new_prefix)
+                    new_state_dict[new_key] = value
+
+        # 加载重命名后的 state_dict 到新模型
+        model.load_state_dict(new_state_dict, strict=True)
+        # model.load_state_dict(torch.load(args.test_model_pth))
         test(
             model=model, 
             test_loader=test_loader, 
             threshold=args.threshold
         )
-    
+        
+
+        logger.info(CASE_NOT_TOPK_HIT)
 
     # python train.py --input_dir "" --do_train --do_test --output_dir "" --num_epochs 50 --lr 1e-4 --threshold 0.5 --seed 42

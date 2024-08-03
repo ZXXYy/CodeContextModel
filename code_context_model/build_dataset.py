@@ -127,7 +127,7 @@ class ExpandGraphDataset(DGLDataset):
         elif isinstance(idx, np.ndarray):
             return [self.graphs[i] for i in idx.tolist()]
         else:
-            return self.graphs[idx]
+            return self.graphs[idx]# , self.xml_files[idx]
 
     def __len__(self):
         return len(self.graphs)
