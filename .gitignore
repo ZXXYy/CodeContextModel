@@ -12,3 +12,4 @@ bge_embedding_results2
 *.tsv
 *.pkl
 codebert_base/
+*.json

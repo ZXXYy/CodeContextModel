@@ -157,8 +157,9 @@ def read_xml_dataset(data_dir, dataset_type, steps: list = [1, 2, 3]):
     model_dirs = json.loads(open(f'{data_dir}/{dataset_type}_index.json').read())
     
     for dir_name in model_dirs:
+        dir_name = '/data0/xiaoyez/CodeContextModel/data/mylyn/' +dir_name.split('/')[-1]
         for step in steps:
-            expand_graph_path = os.path.join(dir_name, f"{step}_step_seeds_expanded_model.xml")
+            expand_graph_path = os.path.join(dir_name, f"collapse_{step}_step_seeds_expanded_model.xml")
             if os.path.exists(expand_graph_path):
                 # logger.info(f"Read xml file: {expand_graph_path}")
                 result_xmls.append(expand_graph_path)

@@ -153,7 +153,7 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     # f1 = f1_metrics(logits, labels)
     # return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
 
-def compute_loss(batch_logits, batch_labels, batch_num_nodes):
+def compute_loss(batch_logits, batch_labels, batch_num_nodes, pos_margin=1.0, neg_margin=0.0):
     batch_size = len(batch_num_nodes)
     start_idx = 0
     total_losses = []
@@ -168,10 +168,10 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         negative_indices = (labels == 0).nonzero().view(-1)
         embeddings = logits
         logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
-        # 定义 margin
-        neg_margin = 0.0
-        pos_margin = 1.0
-        if len(positive_indices) > 0:
+        # use predefined margin
+        # neg_margin = 0.0
+        # pos_margin = 1.0
+        if len(positive_indices) > 0 and len(seed_indices)>0:
             # 生成所有可能的 (seed_index, positive_index) 组合对
             seed_positive_pairs = torch.cartesian_prod(seed_indices, positive_indices)
             # 提取组合对的嵌入
@@ -187,7 +187,7 @@ def compute_loss(batch_logits, batch_labels, batch_num_nodes):
         else:
             positive_loss = torch.tensor(0.0, device=logits.device)
 
-        if len(negative_indices) > 0:
+        if len(negative_indices) > 0 and len(seed_indices)>0:
             # 生成所有可能的 (seed, negative) 组合对
             seed_negative_pairs = torch.cartesian_prod(seed_indices, negative_indices)
             # 提取组合对的嵌入
@@ -215,6 +215,8 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
     threshold = kwargs.get('threshold', 0.5)
     output_dir = kwargs.get('output_dir', 'output')
     debug = kwargs.get('debug', False)
+    pos_margin = kwargs.get('pos_margin', 1.0)
+    neg_margin = kwargs.get('neg_margin', 0.0)
     # 定义损失函数和优化器
     # loss_fn = nn.BCELoss()
     # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
@@ -262,7 +264,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
             #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
             # loss = loss_fn(anchor_embedding, positive_embedding, negative_embedding)
             # logger.info("Loss computing...")
-            loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
+            loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist(), pos_margin=pos_margin, neg_margin=neg_margin)
 
             optimizer.zero_grad()
             loss.backward()
@@ -286,7 +288,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
                 batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
                 eval_graph_num_cnt += len(batch_graphs.batch_num_nodes())
                 logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
-                loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
+                loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist(), pos_margin=pos_margin, neg_margin=neg_margin)
                 eval_loss += loss.item()
                 metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
                 eval_hit_rate = {k: eval_hit_rate[k] + metrics[k] for k in metrics}
@@ -362,6 +364,10 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=42, help='random seed')
     parser.add_argument('--model', type=str, default='rgcn', help='training model')
 
+    # gnn layers
+    parser.add_argument('--gnn_layers', type=int, default=3, help='number of gnn layers')
+    parser.add_argument('--neg_margin', type=float, default=0.0, help='negative margin')
+    parser.add_argument('--pos_margin', type=float, default=1.0, help='positive margin')
     # test args
     parser.add_argument('--do_test', action='store_true', help='test the model')
     parser.add_argument('--test_batch_size', type=int, default=1, help='test batch size')
@@ -404,6 +410,7 @@ if __name__ == "__main__":
     train_dataset = torch.load(os.path.join(args.input_dirs[0], 'train_dataset.pt'))
     valid_dataset = torch.load(os.path.join(args.input_dirs[0], 'valid_dataset.pt'))
     test_dataset = torch.load(os.path.join(args.input_dirs[0], 'test_dataset.pt'))
+    # test_dataset = valid_dataset + train_dataset
 
     for i in range(1, len(args.input_dirs)):
         train_dataset = train_dataset + torch.load(os.path.join(args.input_dirs[i], 'train_dataset.pt'))
@@ -426,7 +433,7 @@ if __name__ == "__main__":
     if 'codebert' in args.embedding_dir:
         num_layers = 768
     if args.model == 'rgcn':
-        model = RGCN(in_feat=num_layers, h_feat=num_layers, out_feat=1, num_rels=8)
+        model = RGCN(in_feat=num_layers, h_feat=num_layers, gnn_layers=args.gnn_layers, out_feat=1, num_rels=8)
     elif args.model == 'gat':
         model = GAT(in_feat=num_layers, h_feat=num_layers, out_feat=1, num_heads=4)
     elif args.model == 'gcn':
@@ -449,6 +456,7 @@ if __name__ == "__main__":
             num_epochs=args.num_epochs,
             threshold=args.threshold,
             output_dir=args.output_dir,
+            pos_margin=args.pos_margin, neg_margin=args.neg_margin,
             debug=args.debug
         )
 

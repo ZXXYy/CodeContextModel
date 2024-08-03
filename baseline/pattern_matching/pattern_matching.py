@@ -11,6 +11,7 @@ import gspan_mining.main
 
 import networkx as nx
 import xml.etree.ElementTree as ET
+import numpy as np
 
 from tqdm import tqdm
 from contextlib import redirect_stdout
@@ -27,9 +28,11 @@ def build_gspan_graph(input_dir, output_path):
     logger.info(f"train sets len: {len(model_dirs)}")
     all_nodes, all_edges = [], []
     for model_dir in model_dirs:
+        model_dir = '/data0/xiaoyez/CodeContextModel/data/mylyn/' +model_dir.split('/')[-1]
         model_file = os.path.join(model_dir, 'code_context_model.xml')
         # 如果不存在模型，跳过处理
         if not os.path.exists(model_file):
+            logger.info(f"model file not found: {model_file}")
             continue
         # 读取code context model,以及doxygen的结果
         tree = ET.parse(model_file)  # 拿到xml树
@@ -97,9 +100,11 @@ def load_tests(input_dir, step):
     model_dirs = json.loads(open(f'{input_dir}/test_index.json').read())
     for model_dir in model_dirs:
         # print('---------------', model_dir)
+        model_dir = '/data0/xiaoyez/CodeContextModel/data/mylyn/' +model_dir.split('/')[-1]
         seed_expand_file = os.path.join(model_dir, f'{step}_step_seeds_expanded_model.xml')
         # 如果不存在模型，跳过处理
         if not os.path.exists(seed_expand_file):
+            # logger.info(f"model file not found: {seed_expand_file}")
             continue
         # 读取code context model,以及doxygen的结果，分1-step,2-step,3-step扩展图
         tree = ET.parse(seed_expand_file)  # 拿到xml树
@@ -230,6 +235,9 @@ def pattern_matching(test_dir, pattern_dir, step: int):
                 test_metrics = {k: test_metrics[k] + metrics[k] for k in metrics}
         test_metrics = {k: v / cnt for k, v in test_metrics.items()}
     end_time = time.time()
+    temp = pattern_dir.split('/')[-1]
+    with open(f'./pattern_matching_result_{step}_{temp}.json', 'w') as f:
+        f.write(json.dumps(test_metrics))
     logger.info(f"Pattern Matching Test finished!\nTime: {end_time - start_time}\nTest Metrics {test_metrics} ")
 
 def compute_hit_rate(G1, confidence):
@@ -292,10 +300,19 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # mine patterns from code context model
+    sup_list = [0.005]
+    # i = 0.01
+    # while i < 0.1:
+    #     sup_list.append(i)
+    #     i += 0.005
+
     if args.do_train:
-        min_sup = 0.015
-        all_nodes, _ = build_gspan_graph('/data0/xiaoyez/CodeContextModel/data/train_test_index', './no_graph.data')
-        gspan_miner('./no_graph.data', f'./no-sup-{min_sup}.data', len(all_nodes))
+        min_sup = 0.01
+        max_sum = 0.1
+        for sup in sup_list:
+            all_nodes, _ = build_gspan_graph('/data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn', './no_graph.data')
+            gspan_miner('./no_graph.data', f'./no-sup-{sup}.data', len(all_nodes), sup)
 
     if args.do_test:
-        pattern_matching('/data0/xiaoyez/CodeContextModel/data/train_test_index', '/data0/xiaoyez/CodeContextModel/no-sup-0.015.data', args.step)
+        for sup in sup_list:
+            pattern_matching('/data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn', f'/data0/xiaoyez/CodeContextModel/no-sup-{sup}.data', args.step)

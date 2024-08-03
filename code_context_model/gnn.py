@@ -21,7 +21,7 @@ class MLP(nn.Module):
 
 
 class RGCN(nn.Module):
-    def __init__(self, in_feat, h_feat, out_feat=1, num_rels=8):
+    def __init__(self, in_feat, h_feat, gnn_layers=3, out_feat=1, num_rels=8):
         """    
         Args:
             # in_feats: 输入特征的维度(embedding dims)
@@ -30,10 +30,11 @@ class RGCN(nn.Module):
             # num_rels: 关系的数量
         """
         super(RGCN, self).__init__()
-        self.conv1 = RelGraphConv(in_feat, h_feat, num_rels, regularizer='basis', num_bases=4)
-        self.conv2 = RelGraphConv(h_feat, h_feat, num_rels, regularizer='basis', num_bases=4)
-        self.conv3 = RelGraphConv(h_feat, h_feat, num_rels, regularizer='basis', num_bases=4)
-        # self.mlp = MLP(h_feat, h_feat, out_feat)       
+        self.conv_layers = nn.ModuleList()
+        self.conv_layers.append(RelGraphConv(in_feat, h_feat, num_rels, regularizer='basis', num_bases=4))
+        for i in range(gnn_layers - 1):
+            self.conv_layers.append(RelGraphConv(h_feat, h_feat, num_rels, regularizer='basis', num_bases=4))
+        self.mlp = MLP(h_feat, h_feat, out_feat)       
 
         self._initialize_parameters() 
 
@@ -48,20 +49,29 @@ class RGCN(nn.Module):
 
 
     def forward(self, g, feat, etype):
-        h = self.conv1(g, feat, etype)
-        h = F.relu(h) + feat  # 添加残差连接
-        h_prev = h  # 保存当前层的输出以用作下一层的残差连接
+        h_prev = feat
+        for i, layer in enumerate(self.conv_layers):
+            h = layer(g, h_prev, etype)
+            h = F.relu(h) + h_prev # 添加残差连接
+            h_prev = h  # 保存当前层的输出以用作下一层的残差连接
+            
+        return h_prev
 
-        h = self.conv2(g, h, etype)
-        h = F.relu(h) + h_prev  # 添加残差连接
-        h_prev = h  # 更新h_prev
 
-        h = self.conv3(g, h, etype)
-        h = F.relu(h) + h_prev  # 添加残差连接
-        # h = F.relu(h)
-        # return self.mlp(h)
-        return h
-        # return F.sigmoid(h)
+        # h = self.conv1(g, feat, etype)
+        # h = F.relu(h) + feat  # 添加残差连接
+        # h_prev = h  # 保存当前层的输出以用作下一层的残差连接
+
+        # h = self.conv2(g, h, etype)
+        # h = F.relu(h) + h_prev  # 添加残差连接
+        # h_prev = h  # 更新h_prev
+
+        # h = self.conv3(g, h, etype)
+        # h = F.relu(h) + h_prev  # 添加残差连接
+        # # h = F.relu(h)
+        # # return self.mlp(h)
+        # return h
+        # # return F.sigmoid(h)
     
 
 class GCN(nn.Module):
