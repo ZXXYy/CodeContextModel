@@ -10,6 +10,7 @@ import dgl
 import wandb
 import atexit
 import numpy as np
+import collections
 
 from tqdm import tqdm
 from torch import nn
@@ -24,8 +25,11 @@ from code_context_model.gnn import RGCN, GCN, GAT, GraphSage
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
 
-TOPK = 100
+TOPK = 5
 CASE_NOT_TOPK_HIT = []
+
+
+ste_results = collections.defaultdict(list)
 
 # handle the exit event
 def exit_handler():
@@ -351,8 +355,6 @@ def test(model, test_loader, **kwargs):
         logger.info(f"Test finished, Test Metrics {test_hit_rate}")
     
 
-    
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -442,17 +444,17 @@ if __name__ == "__main__":
     logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
 
     # # 定义模型
-    num_layers = 1024 # bge embedding dims
+    num_dims = 1024 # bge embedding dims
     if 'codebert' in args.embedding_dir:
-        num_layers = 768
+        num_dims = 768
     if args.model == 'rgcn':
-        model = RGCN(in_feat=num_layers, h_feat=num_layers, gnn_layers=args.gnn_layers, out_feat=1, num_rels=8)
+        model = RGCN(in_feat=num_dims, h_feat=num_dims, gnn_layers=args.gnn_layers, out_feat=1, num_rels=8)
     elif args.model == 'gat':
-        model = GAT(in_feat=num_layers, h_feat=num_layers, out_feat=1, num_heads=4)
+        model = GAT(in_feat=num_dims, h_feat=num_dims, out_feat=1, num_heads=4)
     elif args.model == 'gcn':
-        model = GCN(in_feat=num_layers, h_feat=num_layers, out_feat=1)
+        model = GCN(in_feat=num_dims, h_feat=num_dims, out_feat=1)
     elif args.model == 'graphsage':
-        model = GraphSage(in_feat=num_layers, h_feat=num_layers, out_feat=1)
+        model = GraphSage(in_feat=num_dims, h_feat=num_dims, out_feat=1)
     else:
         raise ValueError(f"Model {args.model} not supported")
     

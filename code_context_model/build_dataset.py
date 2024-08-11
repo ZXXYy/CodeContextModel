@@ -45,6 +45,7 @@ class ExpandGraphDataset(DGLDataset):
     def process(self):
         logger.info(f"building dataset from xml files len: {len(self.xml_files)}...")
         self.graphs = []
+        ste2id = {}
         for xml_file in tqdm(self.xml_files):
             model_dir = xml_file.split('/')[-2]
             embedding_path = os.path.join(self.embedding_dir, f"{model_dir}_{self.embedding_model}_embedding.pkl")
@@ -62,6 +63,9 @@ class ExpandGraphDataset(DGLDataset):
             id_map = {v: i for i, v in enumerate(vertex_ids)}
             vertex_features = []
             vertex_labels = []
+            vertex_ids = []
+            
+            vertex_stereotypes = []
             for vertex in vertices.findall('vertex'):
                 node_id = '_'.join([model_dir, vertex.get('kind'), vertex.get('ref_id')]) 
                 if self.embedding_model == 'codebert':
@@ -78,13 +82,23 @@ class ExpandGraphDataset(DGLDataset):
                         vertex_labels.append(1)
                     else:
                         vertex_labels.append(0)
+                ste = vertex.get('stereotype', None)
+                if  ste not in ste2id.keys():
+                    ste2id[ste] = len(ste)
+                ste_id = ste2id[ste]
+                vertex_stereotypes.append(ste_id)
+                vertex_ids.append([int(model_dir), int(vertex.get('id', None))]) # file_id, vertex_id to locate 
+
+
+
 
             # print(vertex_features)
             # logger.info(f"Read vertex_features features len: {len(vertex_features)}")
             # 将顶点特征转换为张量
             node_features = torch.tensor(vertex_features)
             node_labels = torch.tensor(vertex_labels)
-
+            node_stes = torch.tensor(vertex_stereotypes)
+            node_ids = torch.tensor(vertex_ids)
             # 获取边
             edges = graph_element.find('edges')
             edge_list = []
@@ -109,6 +123,8 @@ class ExpandGraphDataset(DGLDataset):
             # 设置节点特征
             try:
                 g.ndata['feat'] = node_features
+                g.ndata['stereotype'] = node_stes
+                g.ndata['id'] = node_ids
                 # 设置节点标签
                 g.ndata['label'] = node_labels
                 # 设置边特征
@@ -119,6 +135,8 @@ class ExpandGraphDataset(DGLDataset):
                 logger.info(f"node_features: {node_features.shape}")
                 logger.info(f"nodes: {len(vertices)}")
 
+
+        logger.info(ste2id)
             
 
     def __getitem__(self, idx):
@@ -159,7 +177,7 @@ def read_xml_dataset(data_dir, dataset_type, steps: list = [1, 2, 3]):
     for dir_name in model_dirs:
         dir_name = '/data0/xiaoyez/CodeContextModel/data/mylyn/' +dir_name.split('/')[-1]
         for step in steps:
-            expand_graph_path = os.path.join(dir_name, f"collapse_{step}_step_seeds_expanded_model.xml")
+            expand_graph_path = os.path.join(dir_name, f"{step}_step_seeds_expanded_model.xml")
             if os.path.exists(expand_graph_path):
                 # logger.info(f"Read xml file: {expand_graph_path}")
                 result_xmls.append(expand_graph_path)
@@ -182,23 +200,23 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     steps = [1, 2, 3] if args.all_step else [args.step]
-    train_xml_files = read_xml_dataset(args.input_dir, "train", steps)
+    # train_xml_files = read_xml_dataset(args.input_dir, "train", steps)
     test_xml_files = read_xml_dataset(args.input_dir, "test", steps)
 
-    train_data_builder = ExpandGraphDataset(xml_files=train_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
+    # train_data_builder = ExpandGraphDataset(xml_files=train_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
     test_dataset = ExpandGraphDataset(xml_files=test_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
 
-    train_dataset, valid_dataset = split_dataset(train_data_builder)
+    # train_dataset, valid_dataset = split_dataset(train_data_builder)
 
-    logger.info(f"train dataset: {len(train_dataset)}")
-    logger.info(f"valid dataset: {len(valid_dataset)}")
+    # logger.info(f"train dataset: {len(train_dataset)}")
+    # logger.info(f"valid dataset: {len(valid_dataset)}")
     logger.info(f"test dataset: {len(test_dataset)}")
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     # write the dataset to disk
-    torch.save(train_dataset, os.path.join(args.output_dir, 'train_dataset.pt'))
-    torch.save(valid_dataset, os.path.join(args.output_dir, 'valid_dataset.pt'))
+    # torch.save(train_dataset, os.path.join(args.output_dir, 'train_dataset.pt'))
+    # torch.save(valid_dataset, os.path.join(args.output_dir, 'valid_dataset.pt'))
     torch.save(test_dataset,  os.path.join(args.output_dir, 'test_dataset.pt'))
 
     # 使用 DataLoader 加载子集

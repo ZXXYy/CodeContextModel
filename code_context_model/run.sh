@@ -4,7 +4,7 @@ python code_context_model/train.py \
 --train_batch_size 32 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
---input_dirs  "/data0/xiaoyez/CodeContextModel/dataset_collapsed_step1"  \
+--input_dirs  "/data0/xiaoyez/CodeContextModel/dataset_collapsed_step3"  \
 --embedding_dir "/data0/xiaoyez/CodeContextModel/embedding_bge" \
 --output_dir "/data0/xiaoyez/CodeContextModel/model_output" \
 --num_epochs 50 \
@@ -16,7 +16,7 @@ python code_context_model/train.py \
 --seed 42 \
 --device 9 \
 --do_test \
---test_model_pth "/data0/xiaoyez/CodeContextModel/model_output/07-25-20-49/model_48.pth"
+--test_model_pth "/data0/xiaoyez/CodeContextModel/model_output/07-25-21-24/model_22.pth"
 # --do_train
 
 # debug
@@ -34,6 +34,6 @@ python code_context_model/train.py \
 # --test_model_pth "/data0/xiaoyez/CodeContextModel/model_output/model_49.pth" \
 # --num_epochs 50 \
 # --lr 1e-4 \
-# --threshold 0.5 \
+# --threshold 0.5\ 
 # --seed 42
 

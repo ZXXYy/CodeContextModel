@@ -13,3 +13,6 @@ bge_embedding_results2
 *.pkl
 codebert_base/
 *.json
+zendo_dataset/
+*.zip
+*.parquet
