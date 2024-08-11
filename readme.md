@@ -8,12 +8,12 @@ pip install -r requirements.txt # install the packages
 
 ### Reproduce the results
 1. Dataset formation (`dataset_formation/`)
-    run the `run.sh` in the directory to generate the expanded code context model and variable collapsed code context model for 1-step/2-step/3-step.
-    `--input_dir`: dataset path
-    `--action [generate | display | clear]` 
-        - generate: generate the graph for d-step 
-        - display: show the generated graph in the input_dir
-        - clear: delete all generated files
+    - run the `run.sh` in the directory to generate the expanded code context model and variable collapsed code context model for 1-step/2-step/3-step.
+        - `--input_dir`: dataset path
+        - `--action [generate | display | clear]` 
+            - generate: generate the graph for d-step 
+            - display: show the generated graph in the input_dir
+            - clear: delete all generated files
 
 2. GNN model training (`code_context_model/`)
     - Use following command to embed the graph nodes on different embedding models
