@@ -300,7 +300,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # mine patterns from code context model
-    sup_list = [0.005]
+    sup_list = [0.015]
     # i = 0.01
     # while i < 0.1:
     #     sup_list.append(i)

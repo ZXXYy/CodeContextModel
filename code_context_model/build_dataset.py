@@ -200,10 +200,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     steps = [1, 2, 3] if args.all_step else [args.step]
-    # train_xml_files = read_xml_dataset(args.input_dir, "train", steps)
+    train_xml_files = read_xml_dataset(args.input_dir, "train", steps)
     test_xml_files = read_xml_dataset(args.input_dir, "test", steps)
 
-    # train_data_builder = ExpandGraphDataset(xml_files=train_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
+    train_data_builder = ExpandGraphDataset(xml_files=train_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
     test_dataset = ExpandGraphDataset(xml_files=test_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
 
     # train_dataset, valid_dataset = split_dataset(train_data_builder)

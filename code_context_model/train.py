@@ -478,20 +478,20 @@ if __name__ == "__main__":
     if args.do_test:
         logger.info(f"test model path: {args.test_model_pth}")
         old_state_dict = torch.load(args.test_model_pth)
-        mapping = {
-            'conv1': 'conv_layers.0',
-            'conv2': 'conv_layers.1',
-            'conv3': 'conv_layers.2'
-        }
-        new_state_dict = {}
-        for old_key, value in old_state_dict.items():
-            for old_prefix, new_prefix in mapping.items():
-                if old_key.startswith(old_prefix):
-                    new_key = old_key.replace(old_prefix, new_prefix)
-                    new_state_dict[new_key] = value
+        # mapping = {
+        #     'conv1': 'conv_layers.0',
+        #     'conv2': 'conv_layers.1',
+        #     'conv3': 'conv_layers.2'
+        # }
+        # new_state_dict = {}
+        # for old_key, value in old_state_dict.items():
+        #     for old_prefix, new_prefix in mapping.items():
+        #         if old_key.startswith(old_prefix):
+        #             new_key = old_key.replace(old_prefix, new_prefix)
+        #             new_state_dict[new_key] = value
 
         # 加载重命名后的 state_dict 到新模型
-        model.load_state_dict(new_state_dict, strict=True)
+        model.load_state_dict(old_state_dict, strict=True)
         # model.load_state_dict(torch.load(args.test_model_pth))
         test(
             model=model, 

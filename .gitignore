@@ -16,3 +16,6 @@ codebert_base/
 zendo_dataset/
 *.zip
 *.parquet
+dataset_*
+embedding_bge
+embedding_codebert
