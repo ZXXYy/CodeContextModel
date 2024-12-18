@@ -2,24 +2,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from layer import GraphConv
-
+# from layer import GraphConv
+from dgl.nn import GraphConv
 
 class GCNRec(nn.Module):
 
-    def __init__(self, nb_user, nb_item, nb_other, adj,
-                 vocab_sz, lookup_index, pretrain_emb,
+    def __init__(self, vocab_sz, pretrain_emb,
                  dropout=0.2, margin=1, emb_dim=64,
                  kernel_dim=128):
         super(GCNRec, self).__init__()
-        self.nb_user = nb_user
-        self.nb_item = nb_item
-        self.nb_other = nb_other
         self.margin = margin
         self.dropout = dropout
-        self.adj = adj
         self.emb_dim = emb_dim
-        self.lookup_index = lookup_index
+        self.kernel_dim = kernel_dim
+        # self.lookup_index = lookup_index
 
         self.word_emb = nn.Embedding(vocab_sz+1, emb_dim, padding_idx=0)
         self.word_emb.from_pretrained(pretrain_emb)
@@ -29,9 +25,9 @@ class GCNRec(nn.Module):
         self.rnn = nn.GRU(emb_dim, emb_dim, num_layers=2,
                           dropout=0.2, batch_first=True)
         
-        self.other_pos_emb = nn.Embedding(nb_other, emb_dim)
-        self.user_pos_emb = nn.Embedding(nb_user, emb_dim)
-        self.item_pos_emb = nn.Embedding(nb_item, emb_dim)
+        self.other_pos_emb = nn.Embedding(vocab_sz, emb_dim)
+        self.user_pos_emb = nn.Embedding(vocab_sz, emb_dim)
+        self.item_pos_emb = nn.Embedding(vocab_sz, emb_dim)
         self.conv1 = GraphConv(emb_dim, kernel_dim)
         self.conv2 = GraphConv(kernel_dim, kernel_dim)
         self.linear = nn.Linear(2*kernel_dim, 2*emb_dim)
@@ -50,37 +46,85 @@ class GCNRec(nn.Module):
         out = emb.mul(attn).sum(1)
         return out
     
-    def rnn_encoding(self):
+    def rnn_encoding(self, embedding_index):
         # (node_sz, seq_len, 64)
-        emb = self.word_emb(self.lookup_index)
+        emb = self.word_emb(embedding_index)
+        # Create mask for non-zero elements (assuming padding_idx=0)
+        non_zero_mask = (embedding_index != 0).unsqueeze(-1)  # (node_sz, seq_len, 1)
+        # Calculate mean only for non-zero elements
+        sum_embeddings = (emb * non_zero_mask).sum(dim=1)  # (node_sz, emb_dim)
+        count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  # (node_sz, 1)
+        emb = sum_embeddings / count_non_zero  # (node_sz, emb_dim)
         rnn_out, hidden = self.rnn(emb)
         # (node_sz, 64)
         return hidden[-1]
-
-    def refine_embedding(self):
+    
+    def _get_mean_embeddings(self, node_type, emb_layer, embedding_index, node_labels):
+            """Helper function to calculate mean embeddings for given node type"""
+            mask = (node_labels == node_type)
+            embeddings = emb_layer[embedding_index[mask]]  # (num_nodes, seq_len, emb_dim)
+            non_zero_mask = (embedding_index[mask] != 0).unsqueeze(-1)  # (num_nodes, seq_len, 1)
+            sum_embeddings = (embeddings * non_zero_mask).sum(dim=1)  # (num_nodes, emb_dim)
+            count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  # (num_nodes, 1)
+            return sum_embeddings / count_non_zero, mask
+    
+    def refine_embedding(self, graph, node_labels, embedding_index):
+        # embedding_index: (node_sz, seq_len)
         # (node_sz, seq_len, emb_dim) -> (node_sz, emb_dim)
-        pos_emb = torch.cat([self.other_pos_emb.weight,
-                             self.user_pos_emb.weight, self.item_pos_emb.weight])
-        all_emb = pos_emb + self.rnn_encoding()
+        pos_emb = torch.zeros((len(node_labels), self.emb_dim), 
+                            device=embedding_index.device)
+        
+        
+
+        def set_pos_emb_by_type(node_type, pos_emb_by_type):
+            mean_emb, mask = self._get_mean_embeddings(node_type, pos_emb_by_type, embedding_index, node_labels)
+            pos_emb[mask] = mean_emb
+
+        set_pos_emb_by_type(-1, self.user_pos_emb.weight)
+        set_pos_emb_by_type(1, self.item_pos_emb.weight)
+        set_pos_emb_by_type(0, self.other_pos_emb.weight)
+
+        
+        all_emb = pos_emb + self.rnn_encoding(embedding_index)
         h_emb = []
-        conv_emb = F.dropout(self.conv1(all_emb, self.adj),
+        conv_emb = F.dropout(self.conv1(graph, all_emb),
                              p=self.dropout, training=self.training)
         h_emb.append(conv_emb)
-        conv_emb = F.dropout(self.conv2(conv_emb, self.adj),
+        conv_emb = F.dropout(self.conv2(graph, conv_emb),
                              p=self.dropout, training=self.training)
         h_emb.append(conv_emb)
         out_emb = torch.cat(h_emb, dim=1)
         out_emb = self.linear(out_emb)
-        return torch.split(out_emb, [self.nb_other, self.nb_user, self.nb_item])
+        # 根据node_type分别返回对应的embedding
+        return out_emb[node_labels==0], out_emb[node_labels==-1], out_emb[node_labels==1]
 
-    def get_top_items(self, user, k):
-        _, g_user_emb, g_item_emb = self.refine_embedding()
-        user_x = F.embedding(user, g_user_emb)
-        ratings = user_x.mm(g_item_emb.transpose(0, 1))
+    def get_top_items(self, graph, embedding_index, node_labels, k):
+        _, g_user_emb, g_item_emb = self.refine_embedding(graph, node_labels, embedding_index)
+        indices = (node_labels == -1).nonzero().squeeze()
+        random_idx = torch.randint(0, len(indices), (1,)).item()
+        user_idx = indices[random_idx]
+        embeddings = embedding_index[user_idx]
+        user_x = F.embedding(embeddings, g_user_emb)
+        user_x = self.get_non_zero_embedding(embeddings, user_x)
+
+        # 计算 nodel_lables == 0 或 1 的 节点的平均embedding
+        non_zero_mask = (node_labels == 0 or node_labels == 1).unsqueeze(-1)  # (2, seq_len, 1)
+        sum_embeddings = (g_item_emb * non_zero_mask).sum(dim=1)  # (2, emb_dim)
+        count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  
+        candidates_emb = sum_embeddings / count_non_zero  # (#candidates, emb_dim)
+
+        ratings = user_x.mm(candidates_emb.transpose(0, 1))
         values, indices = ratings.topk(k)
         return indices
 
-    def forward(self, user, pos_item, neg_item, label):
+    def get_non_zero_embedding(items, item_x):
+        non_zero_mask = (items != 0).unsqueeze(-1)  # (2, seq_len, 1)
+        sum_embeddings = (item_x  * non_zero_mask).sum(dim=1)  # (2, emb_dim)
+        count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  # (2, 1)
+        item_x = sum_embeddings / count_non_zero  # (2, emb_dim)
+        return item_x
+    
+    def forward(self, graph, embedding_index, node_labels, edge_lable):
         """
         :param user: (batch_sz,) int
         :param pos_item: (batch_sz,) int
@@ -88,11 +132,31 @@ class GCNRec(nn.Module):
         :param adj: laplacian matrix
         :return: loss
         """
-        g_other_emb, g_user_emb, g_item_emb = self.refine_embedding()
+        g_other_emb, g_user_emb, g_item_emb = self.refine_embedding(graph, node_labels, embedding_index)
         # print(g_user_emb.size(), g_item_emb.size(), g_other_emb.size())
-        user_x = F.embedding(user, g_user_emb)
+
+        # 随机选出一个seed作为user
+        indices = (node_labels == -1).nonzero().squeeze()
+        random_idx = torch.randint(0, len(indices), (1,)).item()
+        user_idx = indices[random_idx]
+        embeddings = embedding_index[user_idx]
+        user_x = F.embedding(embeddings, g_user_emb)
+        user_x = self.get_non_zero_embedding(embeddings, user_x)
+
+        pos_idx = (node_labels == -1).nonzero().squeeze().item()
+        pos_item = embedding_index[pos_idx]
         pos_item_x = F.embedding(pos_item, g_item_emb)
-        neg_item_x = F.embedding(neg_item, g_item_emb)
+        pos_item_x = self.get_non_zero_embedding(pos_item, pos_item_x)
+
+        # 随机选择2个node_labels == 0的节点作为负样本
+        neg_indices = (node_labels == 0).nonzero().squeeze()
+        neg_random_idx = torch.randint(0, len(neg_indices), (2,)) # (2,) 随机选择2个索引
+        neg_items = embedding_index[neg_indices[neg_random_idx]] # (2, seq_len) 获取2个节点的词索引序列
+        neg_item_x = F.embedding(neg_items, g_item_emb)  # (2, seq_len, emb_dim) 最终获得的嵌入表示
+        # 对不为0的节点取均值  （2, emb_dim）
+        neg_item_x = self.get_non_zero_embedding(neg_items, neg_item_x)
+
+       
         # inner product between user and pos_item (batch_sz,)
         pos_score = user_x.mul(pos_item_x).sum(1)
         # (k, batch_sz, emb_dim)

@@ -1,6 +1,6 @@
 # code_context_model/run.sh
 python baseline/GNNAPIRec/train.py \
---train_batch_size 32 \
+--train_batch_size 1 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
 --neg_sz 2 \
@@ -8,7 +8,7 @@ python baseline/GNNAPIRec/train.py \
 --input_dirs  "/data2/xiaoyez/CodeContextModel/dataset_word2vec_step1"  \
 --output_dir "/data2/xiaoyez/CodeContextModel/GNNAPIRec/model_output" \
 --num_epochs 50 \
---lr 1e-6 \
+--lr 0.0005 \
 --seed 42 \
 --device 0 \
 --do_train \

@@ -5,7 +5,7 @@
 
 import os
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)))
 import random
 import time
 import argparse
@@ -24,9 +24,10 @@ from itertools import product
 from torch.utils.data import DataLoader
 from torchmetrics.classification import BinaryF1Score, BinaryPrecision, BinaryRecall
 
-from code_context_model.build_dataset import ExpandGraphDataset, split_dataset
-from code_context_model.gnn import RGCN, GCN, GAT, GraphSage
 from lex import LexParser
+from model import GCNRec
+from code_context_model.build_dataset import ExpandGraphDataset
+
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
@@ -166,86 +167,36 @@ def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
     # f1 = f1_metrics(logits, labels)
     # return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
 
-def compute_loss(batch_logits, batch_labels, batch_num_nodes, pos_margin=1.0, neg_margin=0.0):
-    batch_size = len(batch_num_nodes)
-    start_idx = 0
-    total_losses = []
-    logger.debug(f"Batch num: {batch_num_nodes}")
-
-    for i in range(batch_size):
-        # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
-        labels = batch_labels[start_idx : start_idx + batch_num_nodes[i]]
-        logits = batch_logits[start_idx : start_idx + batch_num_nodes[i]]
-        seed_indices = (labels == -1).nonzero().view(-1)
-        positive_indices = (labels == 1).nonzero().view(-1)
-        negative_indices = (labels == 0).nonzero().view(-1)
-        embeddings = logits
-        logger.debug(f"Seed Indices: {len(seed_indices)}, Positive Indices: {len(positive_indices)}, Negative Indices: {len(negative_indices)}")
-        # use predefined margin
-        # neg_margin = 0.0
-        # pos_margin = 1.0
-        if len(positive_indices) > 0 and len(seed_indices)>0:
-            # 生成所有可能的 (seed_index, positive_index) 组合对
-            seed_positive_pairs = torch.cartesian_prod(seed_indices, positive_indices)
-            # 提取组合对的嵌入
-            seed_pair_embeddings = embeddings[seed_positive_pairs[:, 0]]
-            positive_pair_embeddings = embeddings[seed_positive_pairs[:, 1]]
-            # 计算正样本对之间的欧氏距离
-            # positive_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, positive_pair_embeddings)
-            positive_distances = pairwise_cosine_similarity(seed_pair_embeddings, positive_pair_embeddings)
-            # 构建正样本对标签（全1）
-            positive_labels = torch.ones(positive_distances.size(), device=positive_distances.device)
-            # 计算正样本对的 Contrastive Loss
-            positive_loss = torch.mean(positive_labels *  torch.clamp(pos_margin-positive_distances, min=0.0).pow(2)) 
-        else:
-            positive_loss = torch.tensor(0.0, device=logits.device)
-
-        if len(negative_indices) > 0 and len(seed_indices)>0:
-            # 生成所有可能的 (seed, negative) 组合对
-            seed_negative_pairs = torch.cartesian_prod(seed_indices, negative_indices)
-            # 提取组合对的嵌入
-            seed_pair_embeddings = embeddings[seed_negative_pairs[:, 0]]
-            negative_pair_embeddings = embeddings[seed_negative_pairs[:, 1]]
-            # 计算负样本对之间的欧氏距离
-            # negative_distances = torch.nn.functional.pairwise_distance(seed_pair_embeddings, negative_pair_embeddings)
-            negative_distances = pairwise_cosine_similarity(seed_pair_embeddings, negative_pair_embeddings)
-            # 构建负样本对标签（全0）
-            negative_labels = torch.zeros(negative_distances.size(), device=negative_distances.device)
-            # 计算负样本对的 Contrastive Loss
-            negative_loss = torch.mean((1 - negative_labels) * torch.clamp(negative_distances-neg_margin, min=0.0).pow(2))
-        else:
-            negative_loss = torch.tensor(0.0, device=logits.device)
-        # 总的 Contrastive Loss
-        total_losses.append(positive_loss + negative_loss)
-        start_idx += batch_num_nodes[i]
-
-    return torch.stack(total_losses).mean() # , non_seed_logits, non_seed_labels
-
 def train(train_loader, valid_loader, verbose=True, **kwargs):
     pretrained_emb_path = kwargs.get('pretrained_emb_path', None)
+    lr = kwargs.get('lr', 0.01)
+    num_epochs = kwargs.get('num_epochs', 50)
+    output_dir = kwargs.get('output_dir', 'output')
+    neg_sz = kwargs.get('neg_sz', 2)
+
     parser = LexParser(pretrained_emb_path)
     pre_emb = torch.stack([torch.from_numpy(emb) for emb in parser.pre_embedding]).to(device)
 
-    model = GCNRec(len(parser.vocab), pre_emb)
-    logger.info(f"Model Parameters: {sum(p.numel() for p in model.parameters())}")
-    model.to(device)
-
-    optimizer = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-5)
+    model = GCNRec(len(parser.vocab), pre_emb).to(device)
     num_params = sum([p.numel() for p in model.parameters()])
     logger.info('total model parameters: {}'.format(num_params))
 
-    batch_sz = args.batch_sz
-    neg_sz = args.neg_sz
-    save_round = args.save_round
-    nb_epoches = args.epoch_num
-    for i in range(nb_epoches):
-        dataset.shuffle_train()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
+    logger.info("======= Start training =======")
+    for epoch in range(num_epochs):
         model.train()
         epoch_loss = 0
-        for user, pos_item, neg_item in tqdm(dataset.gen_batch(batch_sz, neg_sz),
-                                             total=len(dataset.train)//batch_sz):
-            label = np.concatenate((np.ones(batch_sz), np.zeros(batch_sz*neg_sz)))
-            loss = model(gvar(user), gvar(pos_item), gvar(neg_item), gvar(label))
+        # for user, pos_item, neg_item in tqdm(dataset.gen_batch(batch_sz, neg_sz),
+        #                                      total=len(dataset.train)//batch_sz):
+        for i, batch_graphs in enumerate(train_loader):
+            # label = np.concatenate((np.ones(batch_sz), np.zeros(batch_sz*neg_sz)))
+            # loss = model(gvar(user), gvar(pos_item), gvar(neg_item), gvar(label))
+            batch_graphs = batch_graphs.to(device)
+            batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
+            batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
+            batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
+            loss = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.edata['label'].squeeze(1))
+
             epoch_loss += loss.item()
             if np.isnan(epoch_loss):
                 logger.error(epoch_loss)
@@ -253,118 +204,23 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
             loss.backward()
             optimizer.step()
         print('epoch: {} loss:{}'.format(i, epoch_loss))
-        if (i+1) % save_round == 0:
-            save_model(model, args.dirname, i+1)
-            print('saved model dict')
-            eval2(model, dataset)
+        # save the model
+        torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
 
-
-def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
-    logger.info("======= Start training =======")
-    lr = kwargs.get('lr', 0.01)
-    num_epochs = kwargs.get('num_epochs', 50)
-    threshold = kwargs.get('threshold', 0.5)
-    output_dir = kwargs.get('output_dir', 'output')
-    debug = kwargs.get('debug', False)
-    pos_margin = kwargs.get('pos_margin', 1.0)
-    neg_margin = kwargs.get('neg_margin', 0.0)
-    # 定义损失函数和优化器
-    # loss_fn = nn.BCELoss()
-    # loss_fn = nn.TripletMarginLoss(margin=1.0, p=2)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.001, betas=(0.9, 0.99))
-    
-    prec_metrics = BinaryPrecision(threshold=threshold).to(device)
-    recall_metrics = BinaryRecall(threshold=threshold).to(device)
-    f1_metrics = BinaryF1Score(threshold=threshold).to(device)
-
-    for epoch in tqdm(range(num_epochs)):
-        total_loss, eval_loss = 0.0, 0.0
-        train_graph_num_cnt = 0
-        # train_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
-        # eval_avg_metrics = {"precision": 0.0, "recall": 0.0, "f1": 0.0}
-        train_hit_rate = {}
-        eval_hit_rate = {}
-        for i in range(1, 6):
-            train_hit_rate[f'top{i}_hit'] = 0
-            # train_hit_rate[f'top{i}_precision'] = 0
-            # train_hit_rate[f'top{i}_recall'] = 0
-            eval_hit_rate[f'top{i}_hit'] = 0
-            # eval_hit_rate[f'top{i}_precision'] = 0
-            # eval_hit_rate[f'top{i}_recall'] = 0
-        train_hit_rate['mrr'] = 0
-        train_hit_rate['map'] = 0
-        eval_hit_rate['mrr'] = 0
-        eval_hit_rate['map'] = 0
-
-        model.train()    
-        for i, batch_graphs in enumerate(train_loader):
-            train_graph_num_cnt += len(batch_graphs.batch_num_nodes())
-            # 打印形状以调试
-            # logger.info(f"Node features shape: {batch_graphs.edata['label'].shape}")
-            # logger.info(f"Node features shape: {batch_graphs.edata['label'].squeeze(1).shape}")
-
-            # logger.info(f"Edge labels shape: {batch_graphs.edata['label'].shape}")
-            batch_graphs = batch_graphs.to(device)
-            batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
-            batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
-            batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
-            # logger.info("Model Forwarding...")
-            logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
-            # if epoch > 10:
-            #     logger.info(f"Logits: {logits}")
-            #     logger.info(f"Labels: {batch_graphs.ndata['label']}")
-            # loss = loss_fn(anchor_embedding, positive_embedding, negative_embedding)
-            # logger.info("Loss computing...")
-            loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist(), pos_margin=pos_margin, neg_margin=neg_margin)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-            
-            # logger.info("Metrics computing...")
-            metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist()) # FIXME: wrong train metrics if batchsize > 1
-            train_hit_rate = {k: train_hit_rate[k] + metrics[k] for k in metrics}
-            if verbose:
-                logger.info(f"Train Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
-        
         # evaluate
         model.eval()
         with torch.no_grad():
             eval_graph_num_cnt = 0
             for i, batch_graphs in enumerate(valid_loader):
                 batch_graphs = batch_graphs.to(device)
-                batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
-                batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
-                batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
-                eval_graph_num_cnt += len(batch_graphs.batch_num_nodes())
-                logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
-                loss = compute_loss(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist(), pos_margin=pos_margin, neg_margin=neg_margin)
-                eval_loss += loss.item()
-                metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
-                eval_hit_rate = {k: eval_hit_rate[k] + metrics[k] for k in metrics}
-                if verbose:
-                    logger.info(f"Valid Epoch {epoch}-Batch {i}: Loss {loss.item()}, Metrics {metrics}")
-        
-        train_hit_rate = {"train_"+k: v / train_graph_num_cnt for k, v in train_hit_rate.items()}
-        eval_hit_rate = {"eval_"+k: v / eval_graph_num_cnt for k, v in eval_hit_rate.items()}
-        wandb_log = {
-            "Epoch": epoch,
-            "Train Loss": total_loss,
-            "Eval Loss": eval_loss,
-        }
-        wandb_log.update(train_hit_rate)
-        wandb_log.update(eval_hit_rate)
-        if not debug:
-            wandb.log(wandb_log)
-        logger.info(f"Epoch {epoch}, Train Loss {total_loss}, Train Metrics {train_hit_rate}")
-        logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
-        # save the model
-        torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
-        logger.info(f"Model saved at {output_dir}/model_{epoch}.pth")
-
-    logger.info("======= Training finished =======")
-
+            batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
+            batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
+            batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
+            loss = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.edata['label'].squeeze(1))
+            eval_loss += loss.item()
+            topk = model.get_top_items(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], k=5).cpu().numpy()
+            # TODO: compute_metrics
+            
 def test(model, test_loader, **kwargs):
     logger.info("======= Start testing =======")
     threshold = kwargs.get('threshold', 0.5)
@@ -457,14 +313,6 @@ if __name__ == "__main__":
     train_dataset = torch.load(os.path.join(args.input_dirs[0], 'train_dataset.pt'))
     valid_dataset = torch.load(os.path.join(args.input_dirs[0], 'valid_dataset.pt'))
     test_dataset = torch.load(os.path.join(args.input_dirs[0], 'test_dataset.pt'))
-    # test_dataset = valid_dataset + train_dataset
-
-    # for i, data in enumerate(test_dataset):
-    #     graph, xml_file = data
-    #     # if i in [48, 50, 188, 192, 270, 312, 318, 334, 478, 529]:
-    #     if i in [152, 188, 270, 478, 529]:
-    #         logger.info(graph.ndata['feat'].shape)
-    #         logger.info(xml_file)
 
     for i in range(1, len(args.input_dirs)):
         train_dataset = train_dataset + torch.load(os.path.join(args.input_dirs[i], 'train_dataset.pt'))
@@ -491,9 +339,7 @@ if __name__ == "__main__":
             verbose=False, 
             lr=args.lr,
             num_epochs=args.num_epochs,
-            threshold=args.threshold,
             output_dir=args.output_dir,
-            pos_margin=args.pos_margin, neg_margin=args.neg_margin,
             debug=args.debug
         )
 
@@ -513,6 +359,7 @@ if __name__ == "__main__":
         #             new_state_dict[new_key] = value
 
         # 加载重命名后的 state_dict 到新模型
+        model = None
         model.load_state_dict(old_state_dict, strict=True)
         # model.load_state_dict(torch.load(args.test_model_pth))
         test(

@@ -10,7 +10,7 @@ import logging
 from collections import defaultdict
 
 from baseline.GNNAPIRec.deprecated.preprocess import load_data, get_calls_distribution
-from model import GCNRec
+from baseline.GNNAPIRec.deprecated.model import GCNRec
 
 logging.basicConfig(format='%(asctime)s-%(levelname)s:%(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
