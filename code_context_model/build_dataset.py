@@ -83,10 +83,13 @@ class ExpandGraphDataset(DGLDataset):
                     else:
                         vertex_labels.append(0)
                 ste = vertex.get('stereotype', None)
-                if  ste not in ste2id.keys():
-                    ste2id[ste] = len(ste)
-                ste_id = ste2id[ste]
-                vertex_stereotypes.append(ste_id)
+                if ste:
+                    if  ste not in ste2id.keys():
+                        ste2id[ste] = len(ste)
+                    ste_id = ste2id[ste]
+                    vertex_stereotypes.append(ste_id)
+                else:
+                    vertex_stereotypes.append(-1)
                 vertex_ids.append([int(model_dir), int(vertex.get('id', None))]) # file_id, vertex_id to locate 
 
 
@@ -186,6 +189,15 @@ def read_xml_dataset(data_dir, dataset_type, steps: list = [1, 2, 3]):
     return result_xmls
 
 if __name__ == '__main__':
+    # ======== command run example ========
+    # python code_context_model/build_dataset.py \
+    # --input_dir /data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn \
+    # --embedding_dir "/data2/xiaoyez/CodeContextModel/embedding/mylyn/word2vec" \
+    # --output_dir "/data2/xiaoyez/CodeContextModel/dataset_word2vec_step1" \
+    # --step 1 \
+    # --embedding_model "word2vec"
+    # =====================================
+    
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
@@ -206,17 +218,17 @@ if __name__ == '__main__':
     train_data_builder = ExpandGraphDataset(xml_files=train_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
     test_dataset = ExpandGraphDataset(xml_files=test_xml_files, embedding_dir=args.embedding_dir, embedding_model=args.embedding_model, debug=args.debug)
 
-    # train_dataset, valid_dataset = split_dataset(train_data_builder)
+    train_dataset, valid_dataset = split_dataset(train_data_builder)
 
-    # logger.info(f"train dataset: {len(train_dataset)}")
-    # logger.info(f"valid dataset: {len(valid_dataset)}")
+    logger.info(f"train dataset: {len(train_dataset)}")
+    logger.info(f"valid dataset: {len(valid_dataset)}")
     logger.info(f"test dataset: {len(test_dataset)}")
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     # write the dataset to disk
-    # torch.save(train_dataset, os.path.join(args.output_dir, 'train_dataset.pt'))
-    # torch.save(valid_dataset, os.path.join(args.output_dir, 'valid_dataset.pt'))
+    torch.save(train_dataset, os.path.join(args.output_dir, 'train_dataset.pt'))
+    torch.save(valid_dataset, os.path.join(args.output_dir, 'valid_dataset.pt'))
     torch.save(test_dataset,  os.path.join(args.output_dir, 'test_dataset.pt'))
 
     # 使用 DataLoader 加载子集

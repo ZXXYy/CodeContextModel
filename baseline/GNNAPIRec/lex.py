@@ -36,6 +36,17 @@ class LexParser:
         print('sents size:', len(self.sents))
         return Word2Vec(self.sents, vector_size=self.dim, min_count=1, workers=4, sg=1)
 
+    def get_embedding_index(self, sig):
+        MAX_SEQ_LEN = 10
+        words = self.parse_signature(sig)
+        
+        def padding_seq(v):
+            return v[-MAX_SEQ_LEN:] if len(v) >= MAX_SEQ_LEN else v + [0] * (MAX_SEQ_LEN - len(v))
+        
+        vec = [self.vocab[w] for w in words]
+        vec = padding_seq(vec) 
+        return vec
+    
     def get_embedding(self, sig):
         words = self.parse_signature(sig)
         embedding = np.zeros(self.dim, dtype=np.float32)
@@ -85,8 +96,8 @@ class LexParser:
 
 
 if __name__ == '__main__':
-    parser = LexParser(['Abc/BdbHi/jkLm(int i)', 'lex/LexParser/parse(string)'])
-    embedding = parser.get_embedding('abc/parse/ijk')
+    # parser = LexParser(['Abc/BdbHi/jkLm(int i)', 'lex/LexParser/parse(string)'])
+    # embedding = parser.get_embedding('abc/parse/ijk')
     model = Word2Vec.load('word2vec.pretrain')
-    # print(model.wv.key_to_index.keys())
-    # print(model.wv.vectors.shape)
+    print(model.wv.key_to_index.keys())
+    print(model.wv.vectors.shape)

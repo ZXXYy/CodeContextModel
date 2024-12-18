@@ -55,7 +55,7 @@ def get_nodes_text(expand_graph_path: str) -> pd.DataFrame:
 
 def get_expanded_model_path(input_dir, id_dir):
     for step in [3, 2, 1]:
-        expand_graph_path = os.path.join(input_dir, id_dir, f"{step}_step_seeds_expanded_model.xml")
+        expand_graph_path = os.path.join(input_dir, id_dir, f"new_{step}_step_expanded_model.xml")
         if os.path.exists(expand_graph_path):
             return expand_graph_path
     return None
@@ -84,7 +84,7 @@ def build_word_embedding(corpus, min_count=1):
     parser = LexParser(corpus)
     return parser
 
-def embedding_inference(input_dir, output_dir, parser, debug=False):
+def embedding_index_inference(input_dir, output_dir, parser, debug=False):
     id_dirs = sorted(os.listdir(input_dir))
     id_dirs = id_dirs[:10] if debug else id_dirs
     corpus = []
@@ -95,13 +95,13 @@ def embedding_inference(input_dir, output_dir, parser, debug=False):
         # use 3-step seed expansion model for all possible corpus
         expand_graph_path = get_expanded_model_path(input_dir, id_dir)
         if expand_graph_path is None:
-            logger.info(f"No file in {expand_graph_path}")
+            logger.info(f"No expanded file in { os.path.join(input_dir, id_dir)}")
             continue
 
         # get node embedding
         df_code = get_nodes_text(expand_graph_path)
         codes = df_code["code"]
-        embeddings = [parser.get_embedding(code) for code in codes]
+        embeddings = [parser.get_embedding_index(code) for code in codes]
         df_code.loc[:, 'embedding'] = embeddings   
         df_code = df_code.drop(columns=['code']) 
         # print(df_code)
@@ -113,6 +113,11 @@ def embedding_inference(input_dir, output_dir, parser, debug=False):
         df_code.to_pickle(output_fn)
         
 if __name__ == '__main__':
+    # commnd run example:
+    # python baseline/GNNAPIRec/embedding.py \
+    # --input_dir /data0/xiaoyez/CodeContextModel/data/mylyn \
+    # --output_dir /data2/xiaoyez/CodeContextModel/embedding/mylyn/word2vec 
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
     parser.add_argument('--output_dir', type=str, default='data', help='output directory')
@@ -126,4 +131,4 @@ if __name__ == '__main__':
     else:
         parser = LexParser(None, pretrain_model_path=pretrain_model_path)
 
-    embedding_inference(args.input_dir, args.output_dir, parser, args.debug)
+    embedding_index_inference(args.input_dir, args.output_dir, parser, args.debug)

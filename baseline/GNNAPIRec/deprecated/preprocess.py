@@ -5,7 +5,7 @@ import pickle as pk
 import scipy.sparse as sp
 import numpy as np
 import torch
-from dataset import Dataset
+from baseline.GNNAPIRec.deprecated.dataset import Dataset
 from lex import LexParser
 
 MAX_SEQ_LEN = 10

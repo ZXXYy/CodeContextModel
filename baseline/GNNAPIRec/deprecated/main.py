@@ -9,7 +9,7 @@ import argparse
 import logging
 from collections import defaultdict
 
-from preprocess import load_data, get_calls_distribution
+from baseline.GNNAPIRec.deprecated.preprocess import load_data, get_calls_distribution
 from model import GCNRec
 
 logging.basicConfig(format='%(asctime)s-%(levelname)s:%(message)s', level=logging.INFO)
