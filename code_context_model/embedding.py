@@ -53,9 +53,6 @@ class TextEmbedding():
         
         return all_embeddings.tolist()
 
-
-
-
 class BgeEmbedding(TextEmbedding):
     def __init__(self, device):
         self.tokenizer = AutoTokenizer.from_pretrained('BAAI/bge-large-en-v1.5')
@@ -87,8 +84,8 @@ def get_nodes_text(expand_graph_path: str) -> pd.DataFrame:
     root = tree.getroot()
     nodes = root.findall(".//vertex")
     nodes_id = []
-    model_dir = expand_graph_path.split('/')[-3]
-    codes_path = os.path.dirname(os.path.dirname(expand_graph_path)) + "/my_java_codes.tsv"
+    model_dir = expand_graph_path.split('/')[-2]
+    codes_path = os.path.dirname(expand_graph_path) + "/my_java_codes.tsv"
     # read tsv file
     df_code = pd.read_csv(codes_path, sep='\t')
     for vertex in nodes:
