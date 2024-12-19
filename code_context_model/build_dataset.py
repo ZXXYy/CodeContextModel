@@ -92,7 +92,30 @@ class ExpandGraphDataset(DGLDataset):
                     vertex_stereotypes.append(-1)
                 vertex_ids.append([int(model_dir), int(vertex.get('id', None))]) # file_id, vertex_id to locate 
 
+            
+            if self.embedding_model == 'word2vec':
+                def find_indices(lst, val):
+                    return [i for i, x in enumerate(lst) if x == val]
+                
+                # 从vertex_labels中选取任意一个label为-1的节点保留，把其他label为-1的节点的label设置为0
+                seed_indices = find_indices(vertex_labels, -1)
+                random_peak = random.randint(0, len(seed_indices)-1)
+                for i in seed_indices:
+                    if i != random_peak:
+                        vertex_labels[seed_indices[i]] = 0
 
+                # 从vertex_labels中选取任意两个个label为0的节点，把他们的label设置为
+                neg_indices = find_indices(vertex_labels, 0)
+                if len(neg_indices) < 2:
+                    continue
+                neg_indices = random.sample(neg_indices, 2)
+                vertex_labels[neg_indices[0]] = 2
+                vertex_labels[neg_indices[1]] = 2
+                
+                assert len(find_indices(vertex_labels, -1)) == 1
+                assert len(find_indices(vertex_labels, 1)) == 1
+                assert len(find_indices(vertex_labels, 2)) == 2
+               
 
 
             # print(vertex_features)
