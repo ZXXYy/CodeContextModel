@@ -134,10 +134,9 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
     logger.info("======= Start training =======")
-    for epoch in range(num_epochs):
+    for epoch in tqdm(range(num_epochs)):
         total_loss, eval_loss = 0.0, 0.0
         model.train()
-        epoch_loss = 0
 
         train_hit_rate = {}
         for i in range(1, 6):
@@ -154,15 +153,10 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
             batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
             loss = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.edata['label'].squeeze(1))
 
-            epoch_loss += loss.item()
             total_loss += loss.item()
-            if np.isnan(epoch_loss):
-                logger.error(epoch_loss)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        print('epoch: {} loss:{}'.format(i, epoch_loss))
-
         # evaluate
         eval_hit_rate, eval_loss = eval(model, valid_loader, verbose=False)
         wandb_log = {
@@ -174,6 +168,9 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
         wandb_log.update(eval_hit_rate)
         if not debug:
             wandb.log(wandb_log)
+
+        logger.info(f"Epoch {epoch}, Train Loss {total_loss}")
+        logger.info(f"Epoch {epoch}, Eval  Loss {eval_loss}, Eval Metrics {eval_hit_rate}")
         # save the model
         torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
         logger.info(f"Model saved at {output_dir}/model_{epoch}.pth")
@@ -188,7 +185,7 @@ def eval(model, data_loader, **kwargs):
         eval_hit_rate[f'top{i}_hit'] = 0
     eval_hit_rate['mrr'] = 0
     
-    logger.info("======= Start evaluating =======")
+    # logger.info("======= Start evaluating =======")
     model.eval()
     with torch.no_grad():
         eval_graph_num_cnt = 0
@@ -239,13 +236,14 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='debug mode')
     args = parser.parse_args()
 
-    args.output_dir = os.path.join(args.output_dir, f"{time.strftime('%m-%d-%H-%M')}")
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
+    
     if args.debug:
         args.num_epochs = 1 
         args.test_model_pth = 'model_0.pth'
     elif args.do_train:
+        args.output_dir = os.path.join(args.output_dir, f"{time.strftime('%m-%d-%H-%M')}")
+        if not os.path.exists(args.output_dir):
+            os.makedirs(args.output_dir)
         wandb.init(project="code-context-model")
         # 配置wandb
         config = wandb.config

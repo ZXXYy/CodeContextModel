@@ -8,14 +8,14 @@ python baseline/GNNAPIRec/train.py \
 --input_dirs  "/data2/xiaoyez/CodeContextModel/dataset_word2vec_step1"  \
 --output_dir "/data2/xiaoyez/CodeContextModel/GNNAPIRec/model_output" \
 --num_epochs 50 \
---lr 0.0005 \
+--lr 1e-5 \
 --seed 42 \
 --device 0 \
+--do_test \
 --do_train \
---debug \
---do_test
-# --test_model_pth "/data0/xiaoyez/CodeContextModel/model_output/08-27-20-02/model_48.pth" \
+--test_model_pth "/data2/xiaoyez/CodeContextModel/GNNAPIRec/model_output/12-19-15-09/model_46.pth" 
 # --do_test 
+# --do_train \
 
 
 # debug
