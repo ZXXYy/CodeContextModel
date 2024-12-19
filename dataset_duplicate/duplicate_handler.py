@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 import xml.etree.ElementTree as ET
-from contextlib import redirect_stdout
 from os import path
 
 import pandas as pd
@@ -106,7 +105,7 @@ class DuplicateHandler:
 
     def build_similar_code_pairs(self):
         print("<--- start build similar code_pairs")
-        ufs = dict[str, unionfind]
+        ufs = dict()
         index_to_idx = dict()
         for project, models in self.data.items():
             print("handle project: ", project)
@@ -151,7 +150,7 @@ class CodeSimilarityAnalyzer:
         for te in test:
             for tr in train:
                 intersection += 1 if similar_code_pairs.issame(te, tr) else 0
-        union = len(test.union(train))
+        union = len(test) + len(train) - intersection
         return intersection / union if union > 0 else 0.0
 
     def find_duplicates(self, data, all_index, similar_code_pairs, idx_to_index) -> dict[
@@ -176,6 +175,8 @@ class CodeSimilarityAnalyzer:
                     if jaccard >= self.jaccard_threshold:
                         dup.append((v[1], v[0], jaccard))
             duplicates[project] = dup
+            print(f"project {project} has {len(v[1])} test models")
+            print(f"project {project} has {len(v[0])} train models")
             print(f"project {project} find {len(dup)} duplicate test-train pairs")
             print(f"project {project} find {len(set([i[0] for i in dup]))} duplicated test models")
         print("<--- end find duplicated test models")
@@ -183,19 +184,14 @@ class CodeSimilarityAnalyzer:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="This script takes two strings and one array.")
+    parser = argparse.ArgumentParser(description="This script takes path strings and projects array.")
     parser.add_argument('--path', type=str, help='dataset path', default="/data0/xiaoyez/CodeContextModel/data/")
-    parser.add_argument('--output', type=str, help='output file', default="output.txt")
     parser.add_argument('--projects', type=str, help='projects to handle', default="mylyn,PDE,Platform")
     args = parser.parse_args()
     projects = args.projects.split(',')
 
-    with open(args.output, 'a', buffering=1) as f:
-        # 在 with 块中重定向输出
-        with redirect_stdout(f):
-            print(f"dataset path: {args.path}")
-            print(f"output file: {args.output}")
-            print(f"projects to handle: {projects}")
-            handler = DuplicateHandler(projects, args.path)
-            handler.handle()
-            handler.print_result()
+    print(f"dataset path: {args.path}")
+    print(f"projects to handle: {projects}")
+    handler = DuplicateHandler(projects, args.path)
+    handler.handle()
+    handler.print_result()
