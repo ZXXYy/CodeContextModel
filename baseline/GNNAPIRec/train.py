@@ -79,15 +79,15 @@ def euclidean_distance(x1, x2):
     # 计算欧式距离
     return torch.dist(x1, x2).item()
 
-def compute_mrr(non_seed_indices, labels, similarities):
+def compute_mrr(labels, similarities):
     mrr = 0
-    topk = min(100, len(non_seed_indices))
+    topk = min(100, len(labels))
     topk_indices = torch.topk(similarities, topk).indices.flatten() 
     # print(f"topk_indices shape: {topk_indices.shape}")
     # print(topk_indices)
     for i, item in enumerate(topk_indices):
-        idx = non_seed_indices[topk_indices[i]]
-        if labels[idx] == 1:
+        label = labels[topk_indices[i]]
+        if label == 1:
             mrr = 1 / (i + 1)
             return {'MRR': mrr}
     return {'MRR': 0}
@@ -101,17 +101,18 @@ def compute_metrics(model, graph, node_feats, node_labels):
     for topk in range(1, TOPK+1):
         topk_indices, _ = model.get_top_items(graph, node_feats, node_labels, k=topk)
         topk_indices = topk_indices.cpu().numpy()
-        candidates_idx = ((node_labels == 0) | (node_labels == 1) | (node_labels == 2)).nonzero().squeeze()
+        # print(f"{topk}: {topk_indices}")
+        labels = node_labels[node_labels != -1].cpu().numpy()
         hit = 0
         for i in range(0, len(topk_indices)):
-            idx = candidates_idx[topk_indices[i]] # get the index of the top3 embeddings
-            if node_labels[idx] == 1:
+            label = labels[topk_indices[i]] # get the index of the top3 embeddings
+            if label == 1:
                 hit += 1
                 break
         total_hit[f"top{topk}_hit"] += 1 if hit > 0 else 0
 
     _, ratings = model.get_top_items(graph, node_feats, node_labels, k=topk)
-    mrr = compute_mrr(candidates_idx, node_labels, ratings)
+    mrr = compute_mrr(labels, ratings)
     total_hit['mrr'] += mrr['MRR']
 
     return total_hit
@@ -288,8 +289,6 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=False, collate_fn=dgl.batch)
     logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
     
-    
-
     if args.do_train:
         train(
             train_loader=train_loader, 

@@ -25,9 +25,9 @@ class GCNRec(nn.Module):
         self.rnn = nn.GRU(emb_dim, emb_dim, num_layers=2,
                           dropout=0.2, batch_first=True)
         
-        self.other_pos_emb = nn.Embedding(vocab_sz, emb_dim)
-        self.user_pos_emb = nn.Embedding(vocab_sz, emb_dim)
-        self.item_pos_emb = nn.Embedding(vocab_sz, emb_dim)
+        self.other_pos_emb = nn.Embedding(vocab_sz+1, emb_dim)
+        self.user_pos_emb = nn.Embedding(vocab_sz+1, emb_dim)
+        self.item_pos_emb = nn.Embedding(vocab_sz+1, emb_dim)
         self.conv1 = GraphConv(emb_dim, kernel_dim)
         self.conv2 = GraphConv(kernel_dim, kernel_dim)
         self.linear = nn.Linear(2*kernel_dim, 2*emb_dim)
@@ -61,11 +61,18 @@ class GCNRec(nn.Module):
     
     def _get_mean_embeddings(self, node_type, emb_layer, embedding_index, node_labels):
             """Helper function to calculate mean embeddings for given node type"""
+            # 添加索引检查
             mask = (node_labels == node_type)
-            embeddings = emb_layer[embedding_index[mask]]  # (num_nodes, seq_len, emb_dim)
-            non_zero_mask = (embedding_index[mask] != 0).unsqueeze(-1)  # (num_nodes, seq_len, 1)
+            valid_indices = embedding_index[mask]
+            if torch.any(valid_indices >= len(emb_layer)):
+                print("Warning: Invalid indices detected")
+                valid_indices = torch.clamp(valid_indices, 0, len(emb_layer)-1)
+            
+            embeddings = emb_layer[valid_indices]
+            non_zero_mask = (valid_indices != 0).unsqueeze(-1)
             sum_embeddings = (embeddings * non_zero_mask).sum(dim=1)  # (num_nodes, emb_dim)
             count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  # (num_nodes, 1)
+            
             return sum_embeddings / count_non_zero, mask
     
     def refine_embedding(self, graph, node_labels, embedding_index):
@@ -106,13 +113,16 @@ class GCNRec(nn.Module):
 
         # 计算 nodel_lables == 0 或 1 的 节点的平均embedding
         candidates_idx = ((node_labels == 0) | (node_labels == 1) | (node_labels == 2)).nonzero().squeeze()
+        # print(f"node_labels shape: {node_labels.shape}")
+        # print(f"candidates_idx shape: {candidates_idx.shape}")
         candidates_emb = F.embedding(candidates_idx, out_emb) # # (batch_sz, #candidates, emb_dim)
         # print(f"candidates_emb shape: {candidates_emb.shape}")
 
-        ratings = user_x.mm(candidates_emb.transpose(-2, -1)) # (batch_sz, #candidates)
+        ratings = candidates_emb.mm(user_x.transpose(-2, -1)).squeeze(-1) # (batch_sz, #candidates)
         # print(f"ratings shape: {ratings.shape}")
 
         k = min(k, len(ratings))
+        # print(f"k: {k}")
         values, indices = ratings.topk(k) 
         # print(f"indices shape: {indices.shape}")
         return indices, ratings
