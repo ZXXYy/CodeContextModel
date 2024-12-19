@@ -74,8 +74,6 @@ class GCNRec(nn.Module):
         pos_emb = torch.zeros((len(node_labels), self.emb_dim), 
                             device=embedding_index.device)
         
-        
-
         def set_pos_emb_by_type(node_type, pos_emb_by_type):
             mean_emb, mask = self._get_mean_embeddings(node_type, pos_emb_by_type, embedding_index, node_labels)
             pos_emb[mask] = mean_emb
@@ -83,8 +81,8 @@ class GCNRec(nn.Module):
         set_pos_emb_by_type(-1, self.user_pos_emb.weight)
         set_pos_emb_by_type(1, self.item_pos_emb.weight)
         set_pos_emb_by_type(0, self.other_pos_emb.weight)
+        set_pos_emb_by_type(2, self.other_pos_emb.weight)
 
-        
         all_emb = pos_emb + self.rnn_encoding(embedding_index)
         h_emb = []
         conv_emb = F.dropout(self.conv1(graph, all_emb),
@@ -96,19 +94,18 @@ class GCNRec(nn.Module):
         out_emb = torch.cat(h_emb, dim=1)
         out_emb = self.linear(out_emb)
         # 根据node_type分别返回对应的embedding
-        return out_emb[node_labels==0], out_emb[node_labels==-1], out_emb[node_labels==1]
+        return out_emb
 
     def get_top_items(self, graph, embedding_index, node_labels, k):
         _, g_user_emb, g_item_emb = self.refine_embedding(graph, node_labels, embedding_index)
-        indices = (node_labels == -1).nonzero().squeeze()
-        random_idx = torch.randint(0, len(indices), (1,)).item()
-        user_idx = indices[random_idx]
+
+        user_idx = (node_labels == -1).nonzero().squeeze().item()
         embeddings = embedding_index[user_idx]
         user_x = F.embedding(embeddings, g_user_emb)
         user_x = self.get_non_zero_embedding(embeddings, user_x)
 
         # 计算 nodel_lables == 0 或 1 的 节点的平均embedding
-        non_zero_mask = (node_labels == 0 or node_labels == 1).unsqueeze(-1)  # (2, seq_len, 1)
+        non_zero_mask = (node_labels == 0 or node_labels == 1 or node_labels == 2).unsqueeze(-1)  # (2, seq_len, 1)
         sum_embeddings = (g_item_emb * non_zero_mask).sum(dim=1)  # (2, emb_dim)
         count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  
         candidates_emb = sum_embeddings / count_non_zero  # (#candidates, emb_dim)
@@ -132,33 +129,29 @@ class GCNRec(nn.Module):
         :param adj: laplacian matrix
         :return: loss
         """
-        g_other_emb, g_user_emb, g_item_emb = self.refine_embedding(graph, node_labels, embedding_index)
-        # print(g_user_emb.size(), g_item_emb.size(), g_other_emb.size())
-
+        out_emb = self.refine_embedding(graph, node_labels, embedding_index)
+        # print(f"out_emb shape: {out_emb.shape}")
         # 随机选出一个seed作为user
-        indices = (node_labels == -1).nonzero().squeeze()
-        random_idx = torch.randint(0, len(indices), (1,)).item()
-        user_idx = indices[random_idx]
-        embeddings = embedding_index[user_idx]
-        user_x = F.embedding(embeddings, g_user_emb)
-        user_x = self.get_non_zero_embedding(embeddings, user_x)
+        user_idx = (node_labels == -1).nonzero().squeeze()
+        user_x = F.embedding(user_idx, out_emb)
+        user_x = user_x.unsqueeze(0) if len(user_x.shape) == 1 else user_x
+        # print(f"user_x shape: {user_x.shape}")
 
-        pos_idx = (node_labels == -1).nonzero().squeeze().item()
-        pos_item = embedding_index[pos_idx]
-        pos_item_x = F.embedding(pos_item, g_item_emb)
-        pos_item_x = self.get_non_zero_embedding(pos_item, pos_item_x)
+        pos_idx = (node_labels == -1).nonzero().squeeze()
+        pos_item_x = F.embedding(pos_idx, out_emb)  # (2, seq_len, emb_dim) 最终获得的嵌入表示
+        pos_item_x = pos_item_x.unsqueeze(0) if len(pos_item_x.shape) == 1 else pos_item_x
+        # print(f"pos_item_x shape: {pos_item_x.shape}")
 
-        # 随机选择2个node_labels == 0的节点作为负样本
-        neg_indices = (node_labels == 0).nonzero().squeeze()
-        neg_random_idx = torch.randint(0, len(neg_indices), (2,)) # (2,) 随机选择2个索引
-        neg_items = embedding_index[neg_indices[neg_random_idx]] # (2, seq_len) 获取2个节点的词索引序列
-        neg_item_x = F.embedding(neg_items, g_item_emb)  # (2, seq_len, emb_dim) 最终获得的嵌入表示
-        # 对不为0的节点取均值  （2, emb_dim）
-        neg_item_x = self.get_non_zero_embedding(neg_items, neg_item_x)
-
+        # node_labels == 2的节点是负样本
+        neg_idxes = (node_labels == 2).nonzero().squeeze()
+        neg_item_x = F.embedding(neg_idxes, out_emb)  # (2, seq_len, emb_dim) 最终获得的嵌入表示
+        # print(f"neg_item_x shape: {neg_item_x.shape}")
        
         # inner product between user and pos_item (batch_sz,)
-        pos_score = user_x.mul(pos_item_x).sum(1)
+        pos_score = torch.matmul(user_x, pos_item_x.transpose(0, 1))
+        pos_score = torch.diagonal(pos_score)
+        # print(f"pos_score shape: {pos_score.shape}")
+
         # (k, batch_sz, emb_dim)
         neg_item_x = neg_item_x.view(-1, user_x.size()[0], user_x.size(1))
         # (k, batch_sz, emb_dim)x(batch_sz, emb_dim)->(k, batch_sz, emb_dim)

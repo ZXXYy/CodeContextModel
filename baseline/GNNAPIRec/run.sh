@@ -1,6 +1,6 @@
 # code_context_model/run.sh
 python baseline/GNNAPIRec/train.py \
---train_batch_size 1 \
+--train_batch_size 2 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
 --neg_sz 2 \

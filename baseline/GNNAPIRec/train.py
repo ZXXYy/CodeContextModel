@@ -208,17 +208,17 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
         torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
 
         # evaluate
-        model.eval()
-        with torch.no_grad():
-            eval_graph_num_cnt = 0
-            for i, batch_graphs in enumerate(valid_loader):
-                batch_graphs = batch_graphs.to(device)
-            batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
-            batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
-            batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
-            loss = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.edata['label'].squeeze(1))
-            eval_loss += loss.item()
-            topk = model.get_top_items(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], k=5).cpu().numpy()
+        # model.eval()
+        # with torch.no_grad():
+        #     eval_graph_num_cnt = 0
+        #     for i, batch_graphs in enumerate(valid_loader):
+        #         batch_graphs = batch_graphs.to(device)
+        #     batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
+        #     batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
+        #     batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
+        #     loss = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.edata['label'].squeeze(1))
+        #     eval_loss += loss.item()
+        #     topk = model.get_top_items(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], k=5).cpu().numpy()
             # TODO: compute_metrics
             
 def test(model, test_loader, **kwargs):
