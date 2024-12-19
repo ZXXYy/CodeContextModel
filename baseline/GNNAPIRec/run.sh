@@ -12,7 +12,8 @@ python baseline/GNNAPIRec/train.py \
 --seed 42 \
 --device 0 \
 --do_train \
---debug
+--debug \
+--do_test
 # --test_model_pth "/data0/xiaoyez/CodeContextModel/model_output/08-27-20-02/model_48.pth" \
 # --do_test 
 

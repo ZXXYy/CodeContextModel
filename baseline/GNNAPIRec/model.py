@@ -97,22 +97,25 @@ class GCNRec(nn.Module):
         return out_emb
 
     def get_top_items(self, graph, embedding_index, node_labels, k):
-        _, g_user_emb, g_item_emb = self.refine_embedding(graph, node_labels, embedding_index)
+        out_emb = self.refine_embedding(graph, node_labels, embedding_index)
 
-        user_idx = (node_labels == -1).nonzero().squeeze().item()
-        embeddings = embedding_index[user_idx]
-        user_x = F.embedding(embeddings, g_user_emb)
-        user_x = self.get_non_zero_embedding(embeddings, user_x)
+        user_idx = (node_labels == -1).nonzero().squeeze()
+        user_x = F.embedding(user_idx, out_emb)
+        user_x = user_x.unsqueeze(0) if len(user_x.shape) == 1 else user_x # (batch_sz, 1, emb_dim)
+        # print(f"user_x shape: {user_x.shape}")
 
         # 计算 nodel_lables == 0 或 1 的 节点的平均embedding
-        non_zero_mask = (node_labels == 0 or node_labels == 1 or node_labels == 2).unsqueeze(-1)  # (2, seq_len, 1)
-        sum_embeddings = (g_item_emb * non_zero_mask).sum(dim=1)  # (2, emb_dim)
-        count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  
-        candidates_emb = sum_embeddings / count_non_zero  # (#candidates, emb_dim)
+        candidates_idx = ((node_labels == 0) | (node_labels == 1) | (node_labels == 2)).nonzero().squeeze()
+        candidates_emb = F.embedding(candidates_idx, out_emb) # # (batch_sz, #candidates, emb_dim)
+        # print(f"candidates_emb shape: {candidates_emb.shape}")
 
-        ratings = user_x.mm(candidates_emb.transpose(0, 1))
-        values, indices = ratings.topk(k)
-        return indices
+        ratings = user_x.mm(candidates_emb.transpose(-2, -1)) # (batch_sz, #candidates)
+        # print(f"ratings shape: {ratings.shape}")
+
+        k = min(k, len(ratings))
+        values, indices = ratings.topk(k) 
+        # print(f"indices shape: {indices.shape}")
+        return indices, ratings
 
     def get_non_zero_embedding(items, item_x):
         non_zero_mask = (items != 0).unsqueeze(-1)  # (2, seq_len, 1)

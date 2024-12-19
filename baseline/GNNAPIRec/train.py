@@ -82,7 +82,9 @@ def euclidean_distance(x1, x2):
 def compute_mrr(non_seed_indices, labels, similarities):
     mrr = 0
     topk = min(100, len(non_seed_indices))
-    topk_indices = torch.topk(similarities, topk).indices
+    topk_indices = torch.topk(similarities, topk).indices.flatten() 
+    # print(f"topk_indices shape: {topk_indices.shape}")
+    # print(topk_indices)
     for i, item in enumerate(topk_indices):
         idx = non_seed_indices[topk_indices[i]]
         if labels[idx] == 1:
@@ -90,89 +92,38 @@ def compute_mrr(non_seed_indices, labels, similarities):
             return {'MRR': mrr}
     return {'MRR': 0}
 
-def compute_map(non_seed_indices, labels, similarities, step, topk=5):
-    MAP = 0
-    positive_cnt = 0
-    topk = min(topk, len(non_seed_indices))
-    topk_indices = torch.topk(similarities, topk).indices
-
-    for i, item in enumerate(topk_indices):
-        idx = non_seed_indices[topk_indices[i]]
-        if labels[idx] == 1:
-            positive_cnt += 1
-            MAP += positive_cnt / (i + 1)
-    MAP = MAP / step
-    return {'MAP': MAP}
-
-def compute_metrics(batch_logits, batch_labels, batch_num_nodes):
-    batch_size = len(batch_num_nodes)
-    start_idx = 0
+def compute_metrics(model, graph, node_feats, node_labels):
     total_hit = {}
     for i in range(1, TOPK+1):
         total_hit[f'top{i}_hit'] = 0
     total_hit['mrr'] = 0
-    total_hit['map'] = 0
-        # total_hit[f'top{i}_precision'] = 0
-        # total_hit[f'top{i}_recall'] = 0
+    
+    for topk in range(1, TOPK+1):
+        topk_indices, _ = model.get_top_items(graph, node_feats, node_labels, k=topk)
+        topk_indices = topk_indices.cpu().numpy()
+        candidates_idx = ((node_labels == 0) | (node_labels == 1) | (node_labels == 2)).nonzero().squeeze()
+        hit = 0
+        for i in range(0, len(topk_indices)):
+            idx = candidates_idx[topk_indices[i]] # get the index of the top3 embeddings
+            if node_labels[idx] == 1:
+                hit += 1
+                break
+        total_hit[f"top{topk}_hit"] += 1 if hit > 0 else 0
 
-    logger.debug(f"Batch num:{batch_num_nodes}")
-    for k in range(batch_size):
-        labels = batch_labels[start_idx : start_idx + batch_num_nodes[k]]
-        logits = batch_logits[start_idx : start_idx + batch_num_nodes[k]]
-        seed_indices = (labels == -1).nonzero()
-        positive_indices = (labels == 1).nonzero()
-        seed_embeddings = logits[seed_indices]
-        non_seed_indices = (labels != -1).nonzero()
-        non_seed_embeddings = logits[non_seed_indices]
-
-        similarities = []
-        logger.debug(f"num seed indices: {len(seed_indices)}, num non seed indices: {len(non_seed_indices)}")
-        logger.debug(f"num seed embeddings: {len(seed_embeddings)}, num non seed embeddings: {len(non_seed_embeddings)}")
-
-        similarities = F.cosine_similarity(seed_embeddings[:,None,:] , non_seed_embeddings[None,:,:] , dim=-1) # [num_seed, num_non_seed]
-        logger.debug(f"Similarities shape: {similarities.shape}")
-        logger.debug(f"Similarities: {similarities}")
-        # Sum the similarities across all seed embeddings
-        similarities = similarities.sum(dim=0).squeeze(1)
-        logger.debug(f"Summed similarities shape: {similarities.shape}")
-        logger.debug(f"Similarities: {similarities}")
-        # find top3 similar embeddings
-        for topk in range(1, TOPK+1):
-            temp = topk
-            topk = min(topk, len(non_seed_indices))
-            topk_indices = torch.topk(similarities, topk).indices
-            logger.debug(f"Top{topk} indices: {topk_indices}")
-            hit = 0
-            for i in range(0, len(topk_indices)):
-                idx = non_seed_indices[topk_indices[i]] # get the index of the top3 embeddings
-                if labels[idx] == 1:
-                    hit += 1
-                    break
-            # total_hit[f"top{temp}_precision"] += (hit+len(seed_indices)) / (topk+len(seed_indices))
-            # total_hit[f"top{temp}_recall"] += (hit+len(seed_indices)) / (len(seed_indices)+len(positive_indices))
-            total_hit[f"top{temp}_hit"] += 1 if hit > 0 else 0
-
-        mrr = compute_mrr(non_seed_indices, labels, similarities)
-
-        step = len(positive_indices) if len(positive_indices) > 0 else 2
-        map_metrics = compute_map(non_seed_indices, labels, similarities, step)
-
-        total_hit['mrr'] += mrr['MRR']
-        total_hit['map'] += map_metrics['MAP']
-        start_idx += batch_num_nodes[k]
+    _, ratings = model.get_top_items(graph, node_feats, node_labels, k=topk)
+    mrr = compute_mrr(candidates_idx, node_labels, ratings)
+    total_hit['mrr'] += mrr['MRR']
 
     return total_hit
-    # prec = prec_metrics(logits, labels)
-    # recall = recall_metrics(logits, labels)
-    # f1 = f1_metrics(logits, labels)
-    # return {"precision": prec.item(), "recall": recall.item(), "f1": f1.item()}
-
+    
 def train(train_loader, valid_loader, verbose=True, **kwargs):
     pretrained_emb_path = kwargs.get('pretrained_emb_path', None)
     lr = kwargs.get('lr', 0.01)
     num_epochs = kwargs.get('num_epochs', 50)
     output_dir = kwargs.get('output_dir', 'output')
     neg_sz = kwargs.get('neg_sz', 2)
+    debug = kwargs.get('debug', False)
+
 
     parser = LexParser(pretrained_emb_path)
     pre_emb = torch.stack([torch.from_numpy(emb) for emb in parser.pre_embedding]).to(device)
@@ -184,8 +135,14 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
     logger.info("======= Start training =======")
     for epoch in range(num_epochs):
+        total_loss, eval_loss = 0.0, 0.0
         model.train()
         epoch_loss = 0
+
+        train_hit_rate = {}
+        for i in range(1, 6):
+            train_hit_rate[f'top{i}_hit'] = 0
+        train_hit_rate['mrr'] = 0
         # for user, pos_item, neg_item in tqdm(dataset.gen_batch(batch_sz, neg_sz),
         #                                      total=len(dataset.train)//batch_sz):
         for i, batch_graphs in enumerate(train_loader):
@@ -198,61 +155,64 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
             loss = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.edata['label'].squeeze(1))
 
             epoch_loss += loss.item()
+            total_loss += loss.item()
             if np.isnan(epoch_loss):
                 logger.error(epoch_loss)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
         print('epoch: {} loss:{}'.format(i, epoch_loss))
-        # save the model
-        torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
 
         # evaluate
-        # model.eval()
-        # with torch.no_grad():
-        #     eval_graph_num_cnt = 0
-        #     for i, batch_graphs in enumerate(valid_loader):
-        #         batch_graphs = batch_graphs.to(device)
-        #     batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
-        #     batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
-        #     batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
-        #     loss = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.edata['label'].squeeze(1))
-        #     eval_loss += loss.item()
-        #     topk = model.get_top_items(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], k=5).cpu().numpy()
-            # TODO: compute_metrics
-            
-def test(model, test_loader, **kwargs):
-    logger.info("======= Start testing =======")
-    threshold = kwargs.get('threshold', 0.5)
+        eval_hit_rate, eval_loss = eval(model, valid_loader, verbose=False)
+        wandb_log = {
+            "Epoch": epoch,
+            "Train Loss": total_loss,
+            "Eval Loss": eval_loss,
+        }
+        wandb_log.update(train_hit_rate)
+        wandb_log.update(eval_hit_rate)
+        if not debug:
+            wandb.log(wandb_log)
+        # save the model
+        torch.save(model.state_dict(), f"{output_dir}/model_{epoch}.pth")
+        logger.info(f"Model saved at {output_dir}/model_{epoch}.pth")
 
+    logger.info("======= Training finished =======")
+
+def eval(model, data_loader, **kwargs):
+    verbose = kwargs.get('verbose', True)
+    eval_loss = 0.0
+    eval_hit_rate = {}
+    for i in range(1, 6):
+        eval_hit_rate[f'top{i}_hit'] = 0
+    eval_hit_rate['mrr'] = 0
+    
+    logger.info("======= Start evaluating =======")
     model.eval()
     with torch.no_grad():
-        test_hit_rate = {}
-        for i in range(1, TOPK+1):
-            test_hit_rate[f'top{i}_hit'] = 0
-            test_hit_rate[f'top{i}_precision'] = 0
-            test_hit_rate[f'top{i}_recall'] = 0
-        test_hit_rate['mrr'] = 0
-        test_hit_rate['map'] = 0
-        for i, batch_graphs in enumerate(test_loader):
+        eval_graph_num_cnt = 0
+        for i, batch_graphs in enumerate(data_loader):
             batch_graphs = batch_graphs.to(device)
             batch_graphs.ndata['feat'] = batch_graphs.ndata['feat'].to(device)
             batch_graphs.edata['label'] = batch_graphs.edata['label'].to(device)
             batch_graphs.ndata['label'] = batch_graphs.ndata['label'].to(device)
-            logits = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.edata['label'].squeeze(1))
-            # non_seed_indices = (batch_graphs.ndata['label'] != -1).nonzero()
-            # # 根据non_seed_indices选出对应的logits和labels
-            # non_seed_logits = logits.squeeze(1)[non_seed_indices]
-            # non_seed_labels = batch_graphs.ndata['label'].float()[non_seed_indices]
-            metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
-            if metrics[f"top{TOPK}_hit"] == 0:
-                CASE_NOT_TOPK_HIT.append(i)
-                logger.info(f"{i}: #nodes={batch_graphs.ndata['feat'].shape} #edges={batch_graphs.edata['label'].shape}")
-            # logger.info(f"Test Batch {i}: Metrics {metrics}")
-            test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
+            loss = model(batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'], batch_graphs.edata['label'].squeeze(1))
+            eval_graph_num_cnt += len(batch_graphs.batch_num_nodes())
+            eval_loss += loss.item()
+            # TODO: compute_metrics
+            metrics = compute_metrics(model, batch_graphs, batch_graphs.ndata['feat'], batch_graphs.ndata['label'])
+            # print(f"Eval Batch {i}: Metrics {metrics}")
+            eval_hit_rate = {k: eval_hit_rate[k] + metrics[k] for k in metrics}
         
-        test_hit_rate = {k: v / len(test_loader) for k, v in test_hit_rate.items()}
-        logger.info(f"Test finished, Test Metrics {test_hit_rate}")
+        eval_hit_rate = {"eval_"+k: v / eval_graph_num_cnt for k, v in eval_hit_rate.items()}
+    
+    return eval_hit_rate, eval_loss
+    
+def test(model, test_loader, **kwargs):
+    logger.info("======= Start testing =======")
+    test_hit_rate, _ = eval(model, test_loader, verbose=False)
+    logger.info(f"Test finished, Test Metrics {test_hit_rate}")
     
 
 if __name__ == "__main__":
@@ -346,29 +306,15 @@ if __name__ == "__main__":
     if args.do_test:
         logger.info(f"test model path: {args.test_model_pth}")
         old_state_dict = torch.load(args.test_model_pth)
-        # mapping = {
-        #     'conv1': 'conv_layers.0',
-        #     'conv2': 'conv_layers.1',
-        #     'conv3': 'conv_layers.2'
-        # }
-        # new_state_dict = {}
-        # for old_key, value in old_state_dict.items():
-        #     for old_prefix, new_prefix in mapping.items():
-        #         if old_key.startswith(old_prefix):
-        #             new_key = old_key.replace(old_prefix, new_prefix)
-        #             new_state_dict[new_key] = value
-
         # 加载重命名后的 state_dict 到新模型
-        model = None
-        model.load_state_dict(old_state_dict, strict=True)
-        # model.load_state_dict(torch.load(args.test_model_pth))
+        parser = LexParser(args.pretrained_emb_path)
+        pre_emb = torch.stack([torch.from_numpy(emb) for emb in parser.pre_embedding]).to(device)
+        model = GCNRec(len(parser.vocab), pre_emb).to(device)
+        # model.load_state_dict(old_state_dict, strict=True)
+        model.load_state_dict(torch.load(args.test_model_pth))
         test(
             model=model, 
             test_loader=test_loader, 
-            threshold=args.threshold
         )
-        
-
-        logger.info(CASE_NOT_TOPK_HIT)
 
     # python train.py --input_dir "" --do_train --do_test --output_dir "" --num_epochs 50 --lr 1e-4 --threshold 0.5 --seed 42
