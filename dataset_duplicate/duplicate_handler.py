@@ -28,15 +28,17 @@ def build_similar_code_clusters(code_snippets, similarity_threshold=0.8):
     n = len(code_snippets)
     uf = unionfind(n)
 
+    total = 0
     count = 0
     for i in range(n):
         for j in range(i + 1, n):
+            total += 1
             bleu_score = calculate_bleu_nltk(code_snippets[i], code_snippets[j])
             if bleu_score >= similarity_threshold:
                 print("find one similar code cluster", i, j, bleu_score)
                 count += 1
                 uf.unite(i, j)
-    print("number of code snippets: ", n)
+    print("number of compared code snippets: ", total)
     print("number of similar code snippets: ", count)
     print("---> end build similar code clusters...")
     return uf
@@ -110,12 +112,14 @@ class DuplicateHandler:
         for project, models in self.data.items():
             print("handle project: ", project)
             codes = list()
+            i_to_i = dict()
             for model in models.values():
                 for v in model:
-                    index_to_idx[v[0]] = len(codes)
+                    i_to_i[v[0]] = len(codes)
                     codes.append(v[1])
             uf = build_similar_code_clusters(codes)
             ufs[project] = uf
+            index_to_idx[project] = i_to_i
         print("---> end build similar code_pairs")
         return ufs, index_to_idx
 
@@ -134,8 +138,14 @@ class DuplicateHandler:
                                                                    idx_to_index=self.idx_to_index)
 
     def print_result(self):
+        print("<--- start print_result")
+        print("-------similar_code_pairs-------")
         print(self.similar_code_pairs)
+        print("-------idx_to_index-------")
+        print(self.idx_to_index)
+        print("-------duplicate_model_pairs-------")
         print(self.duplicate_model_pairs)
+        print("---> end print_result")
 
 
 class CodeSimilarityAnalyzer:
@@ -167,13 +177,13 @@ class CodeSimilarityAnalyzer:
                     train = data[project][train_index]
                     test_set = set()
                     for snippet in test:
-                        test_set.add(idx_to_index[snippet[0]])
+                        test_set.add(idx_to_index[project][snippet[0]])
                     train_set = set()
                     for snippet in train:
-                        train_set.add(idx_to_index[snippet[0]])
-                    jaccard = self.calculate_jaccard(similar_code_pairs, test_set, train_set)
+                        train_set.add(idx_to_index[project][snippet[0]])
+                    jaccard = self.calculate_jaccard(similar_code_pairs[project], test_set, train_set)
                     if jaccard >= self.jaccard_threshold:
-                        dup.append((v[1], v[0], jaccard))
+                        dup.append((test_index, train_index, jaccard))
             duplicates[project] = dup
             print(f"project {project} has {len(v[1])} test models")
             print(f"project {project} has {len(v[0])} train models")
