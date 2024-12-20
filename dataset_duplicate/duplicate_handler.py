@@ -46,6 +46,7 @@ def build_similar_code_clusters(code_snippets, similarity_threshold=0.8):
 
 class DuplicateHandler:
     def __init__(self, projects, dataset_path):
+        self.duplicate_inner_model_pairs = None
         self.duplicate_model_pairs = None
         self.analyzer = None
         self.idx_to_index = None
@@ -137,6 +138,11 @@ class DuplicateHandler:
                                                                    similar_code_pairs=self.similar_code_pairs,
                                                                    idx_to_index=self.idx_to_index)
 
+        self.duplicate_inner_model_pairs = self.analyzer.find_test_inner_duplicates(data=self.data,
+                                                                                    all_index=self.all_index,
+                                                                                    similar_code_pairs=self.similar_code_pairs,
+                                                                                    idx_to_index=self.idx_to_index)
+
     def print_result(self):
         print("<--- start print_result")
         print("-------similar_code_pairs-------")
@@ -145,6 +151,8 @@ class DuplicateHandler:
         print(self.idx_to_index)
         print("-------duplicate_model_pairs-------")
         print(self.duplicate_model_pairs)
+        print("-------duplicate_inner_model_pairs-------")
+        print(self.duplicate_inner_model_pairs)
         print("---> end print_result")
 
 
@@ -190,6 +198,36 @@ class CodeSimilarityAnalyzer:
             print(f"project {project} find {len(dup)} duplicate test-train pairs")
             print(f"project {project} find {len(set([i[0] for i in dup]))} duplicated test models")
         print("<--- end find duplicated test models")
+        return duplicates
+
+    def find_test_inner_duplicates(self, data, all_index, similar_code_pairs, idx_to_index) -> dict[
+        str, list[tuple[int, int, float]]]:
+        """找出测试数据集中的自重复数据对"""
+        print("<--- start find inner duplicated test models")
+        duplicates = dict()
+
+        for project, v in all_index.items():  # model_id
+            dup = []
+            for i in range(v[1]):
+                for j in range(i + 1, v[1]):
+                    test_index = v[1][i]
+                    test_index_another = v[1][j]
+                    test = data[project][test_index]  # [(idx, code),...]
+                    test_another = data[project][test_index_another]
+                    test_set = set()
+                    for snippet in test:
+                        test_set.add(idx_to_index[project][snippet[0]])
+                    test_another_set = set()
+                    for snippet in test_another:
+                        test_another_set.add(idx_to_index[project][snippet[0]])
+                    jaccard = self.calculate_jaccard(similar_code_pairs[project], test_set, test_another_set)
+                    if jaccard >= self.jaccard_threshold:
+                        dup.append((test_index, test_index_another, jaccard))
+            duplicates[project] = dup
+            print(f"project {project} has {len(v[1])} test models")
+            print(f"project {project} find {len(dup)} duplicate test-test pairs")
+            print(f"project {project} find {len(set([i[0] for i in dup]))} duplicated test models")
+        print("<--- end find inner duplicated test models")
         return duplicates
 
 
