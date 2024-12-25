@@ -34,7 +34,7 @@ def plot_distribution(data, outfig):
     ax.xaxis.label.set_size(25)
 
     ax2 = ax.twinx()
-    ax2.plot(cumulative_count.keys(), cumulative_count.values(), color='navy')
+    ax2.plot(cumulative_count.keys(), cumulative_count.values(), marker='o', linestyle='-', color='b')
     ax2.set_ylabel('Percentage')
     ax2.yaxis.label.set_size(25)
     ax2.tick_params(labelsize=25)
@@ -79,8 +79,8 @@ def get_cross_file_count(codes_path):
         file_path = graph.attrib['repo_path']
         file_paths.add(file_path)
     
-    if len(file_paths) == 2:
-        logger.info(f"{codes_path} files: {len(file_paths)}")
+    # if len(file_paths) == 2:
+    #     logger.info(f"{codes_path} files: {len(file_paths)}")
     logger.debug(f"{codes_path} files: {len(file_paths)}")
     return file_paths
 
@@ -131,16 +131,16 @@ def filter_few_nodes_from_test(test_index_file):
 
 
 if __name__ == "__main__":
-    # project_dirs = [
-    #     '/data0/xiaoyez/CodeContextModel/data/mylyn',
-    #     '/data0/xiaoyez/CodeContextModel/data/PDE',
-    #     '/data0/xiaoyez/CodeContextModel/data/Platform',
-    # ]
-    # for project_dir in project_dirs:
-    #     get_code_context_model_statistics(project_dir)
-    #     get_cross_file_statistics(project_dir)
+    project_dirs = [
+        '/data0/xiaoyez/CodeContextModel/data/mylyn',
+        '/data0/xiaoyez/CodeContextModel/data/PDE',
+        '/data0/xiaoyez/CodeContextModel/data/Platform',
+    ]
+    for project_dir in project_dirs:
+        get_code_context_model_statistics(project_dir)
+        get_cross_file_statistics(project_dir)
 
-    test_index_file = '/data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn/test_index.json'
-    filter_cross_file_from_test(test_index_file)
-    filter_few_nodes_from_test(test_index_file)
+    # test_index_file = '/data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn/test_index.json'
+    # filter_cross_file_from_test(test_index_file)
+    # filter_few_nodes_from_test(test_index_file)
 
