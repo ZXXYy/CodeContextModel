@@ -1,3 +1,4 @@
+import os
 import torch
 
 from transformers import BertTokenizerFast, RobertaTokenizer, AutoTokenizer, AutoModel
@@ -69,6 +70,10 @@ class DocTokenizer:
             batch_added = [x.replace(';', ' [SEP] ') for x in batch_added]
             batch_removed = [x[2] for x in batch_text]
             batch_removed = [x.replace(';', ' [SEP] ') for x in batch_removed]
+        
+        elif self.special_tokens_cfg == 'CodeContext':
+            # batch_text = [self.special_tokens['D'] + ' ' + x for x in batch_text]
+            batch_text = [x.replace(';', ' [SEP] ') for x in batch_text]
 
         else:
             batch_text = [self.special_tokens['D'] + ' ' + process_hunk(x, nodesequence_tok=self.special_tokens['V']) for x in batch_text]
@@ -169,7 +174,7 @@ def tensorize_triples(query_tokenizer, doc_tokenizer, queries, positive_hunk, ne
     N = len(queries)
     Q_ids, Q_mask = query_tokenizer.tensorize(queries)
     D_ids, D_mask = doc_tokenizer.tensorize(positive_hunk + negative_hunk)
-    D_ids, D_mask = D_ids.view(2, N, -1), D_mask.view(2, N, -1)
+    D_ids, D_mask = D_ids.view(2, N, -1), D_mask.view(2, N, -1) # 2 means positive negative for each query
 
     # Compute max among {length of i^th positive, length of i^th negative} for i \in N
     maxlens = D_mask.sum(-1).max(0).values
@@ -221,7 +226,11 @@ def load_tokenizer(config):
 
 
 def load_tokenizer_doc(config):
-    tok = AutoTokenizer.from_pretrained('../SemanticCodeBERT')
+    # get current directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    print(current_dir)
+    tok = AutoTokenizer.from_pretrained(os.path.join(current_dir, '../SemanticCodeBERT'))
+    # tok = AutoTokenizer.from_pretrained('../SemanticCodeBERT')
     return tok
 
 def divide_hunk(hunk, context_tok='[UNUSED_1]', added_tok='[UNUSED_2]', removed_tok='[UNUSED_3]', nodesequence_tok='[UNUSED_4]', concate=True):

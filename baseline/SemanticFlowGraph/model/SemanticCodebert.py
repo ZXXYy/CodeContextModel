@@ -3,6 +3,9 @@ import logging
 import os
 import random
 import string
+import pandas as pd
+import xml.etree.ElementTree as ET
+
 from functools import partial
 
 import torch
@@ -24,21 +27,44 @@ class EagerBatcher:
         self.rank, self.nranks = rank, nranks
         self.bsize, self.accumsteps = args.bsize, args.accumsteps
 
-        self.query_tokenizer = QueryTokenizer(args.config, args.query_maxlen)
+        self.query_tokenizer = DocTokenizer(args.config, args.doc_maxlen, args.special_tokens)
         self.doc_tokenizer = DocTokenizer(args.config, args.doc_maxlen, args.special_tokens)
         self.tensorize_triples = partial(tensorize_triples, self.query_tokenizer, self.doc_tokenizer)
         self.data_dpath = args.data_dpath
         self.granularity = args.granularity
+        self.step = args.step
 
-        self.triples_path = os.path.join(args.data_dpath, args.triples)
+        # self.triples_path = os.path.join(args.data_dpath, args.triples)
         self._reset_triples()
 
     def _reset_triples(self):
         cwd = os.getcwd()
         print(cwd)
-        self.reader = open(self.triples_path, mode='r', encoding='utf-8')
+        project_name = self.data_dpath.split('/')[-1]
+        train_test_index_path = os.path.join(
+            os.path.dirname(self.data_dpath), 
+            'train_test_index', 
+            project_name, 
+            'train_index.json'
+        )
+        self.reader = json.load(open(train_test_index_path))
+        self.reader = [x.replace('repo_first_3', project_name) for x in self.reader]
+        # filter out if the code context is null
+        def filter_code_context(x):
+            code_context_path = os.path.join(x, 'code_context_model.xml')
+            if not os.path.exists(code_context_path):
+                return False
+            tree = ET.parse(code_context_path)
+            root = tree.getroot()
+            nodes = root.findall(".//vertex")
+            if len(nodes) == 0:
+                return False
+            return True
+        self.reader = [x for x in self.reader if filter_code_context(x)]
+
+        # self.reader = open(self.triples_path, mode='r', encoding='utf-8')
         # skip header
-        self.reader.readline()
+        # self.reader.readline()
 
         self.position = 0
 
@@ -48,26 +74,70 @@ class EagerBatcher:
     def __next__(self):
         queries, positive_hunk, negative_hunk = [], [], []
         line_idx = 0
-        for line_idx, line in zip(range(self.bsize * self.nranks * 2), self.reader):
+        for line_idx, line in zip(range(self.bsize * self.nranks), self.reader):
             if (self.position + line_idx) % self.nranks != self.rank:
                 continue
+            
+            expanded_model_path = os.path.join(line, f"{self.step}_step_seeds_expanded_model.xml")
+            model_dir = expanded_model_path.split('/')[-2]
+            codes_path = os.path.join(line, f"my_java_codes.tsv")
+            df_code = pd.read_csv(codes_path, sep='\t')
+            if not os.path.exists(expanded_model_path):
+                continue
 
-            query, hunk, label = line.strip().split(',')
-            with open(os.path.join(self.data_dpath, self.granularity, hunk), 'r') as f:
-                data = json.load(f)
-                hunk = data['commit']
+            query, pos_hunk, neg_hunk = '', '', ''
+            
+            tree = ET.parse(expanded_model_path)
+            root = tree.getroot()
+            nodes = root.findall(".//vertex")
+            
+            def random_pick(nodes):
+                logger.debug(f"num of neg nodes: {len(nodes)}")
+                if len(nodes) == 0:
+                    return ''
+                node = random.choice(nodes)
+                node_id = '_'.join([model_dir, node.get('kind'), node.get('ref_id')]) 
+                code = df_code[df_code['id'] == node_id]['code'].values[0]
+                return code 
+            
+            logger.debug(f"line : {line}")
+            neg_nodes = root.findall(".//vertex[@origin='0']") # get neg nodes
+            neg_hunk = random_pick(neg_nodes) + ' [UNUSED_6] '
+            
+            for vertex in nodes:
+                node_id = '_'.join([model_dir, vertex.get('kind'), vertex.get('ref_id')]) 
+                code = df_code[df_code['id'] == node_id]['code'].values[0]
+                if vertex.get('seed', '0') == '1':
+                    query += code + ' [UNUSED_6] '
+                elif vertex.get('origin', '0') == '1':
+                    pos_hunk += code + ' [UNUSED_6] '
+                
 
-            if label == '1.0':
-                queries.append(query)
-                positive_hunk.append(hunk)
-            else:
-                negative_hunk.append(hunk)
+            queries.append(query)
+            positive_hunk.append(pos_hunk)
+            negative_hunk.append(neg_hunk)
+            
+            # logger.info(f"query: {query}")
+            # logger.info(f"pos_hunk: {pos_hunk}")
+            # logger.info(f"neg_hunk: {neg_hunk}")    
+            # query, hunk, label = line.strip().split(',')
+            # with open(os.path.join(self.data_dpath, self.granularity, hunk), 'r') as f:
+            #     data = json.load(f)
+            #     hunk = data['commit']
+
+            # if label == '1.0':
+            #     queries.append(query)
+            #     positive_hunk.append(hunk)
+            # else:
+            #     negative_hunk.append(hunk)
 
         self.position += line_idx + 1
+        # pop first self.bsize * self.nranks items in reader
+        self.reader = self.reader[self.bsize * self.nranks:]
 
         if len(queries) < self.bsize:
             raise StopIteration
-
+        logger.debug(f"len(queries): {len(queries)}, len(positive_hunk): {len(positive_hunk)}, len(negative_hunk): {len(negative_hunk)}")
         return self.collate(queries, positive_hunk, negative_hunk)
 
     def collate(self, queries, positive_hunk, negative_hunk):
@@ -93,9 +163,9 @@ class SemanticCodebert(nn.Module):
         super(SemanticCodebert, self).__init__()
         self.config = config
         self.token_config = token_config
-        assert token_config in ['QD', 'QARC', 'QARCL']
-        self.bert_q_text = self._load_pretrained_bert()
-        self.bert_k_text = self._load_pretrained_bert()
+        assert token_config in ['QD', 'QARC', 'QARCL', 'CodeContext']
+        self.bert_q_text = self._load_pretrained_bert_code()
+        self.bert_k_text = self._load_pretrained_bert_code()
         self.bert_q_code = self._load_pretrained_bert_code()
         self.bert_k_code = self._load_pretrained_bert_code()
 
@@ -222,8 +292,12 @@ class SemanticCodebert(nn.Module):
         return bert
 
     def _load_pretrained_bert_code(self):
-        tokenizer = AutoTokenizer.from_pretrained('../SemanticCodeBERT')
-        bert = AutoModel.from_pretrained('../SemanticCodeBERT')
+        # get current directory
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        tokenizer = AutoTokenizer.from_pretrained(os.path.join(current_dir, '../SemanticCodeBERT'))
+        bert = AutoModel.from_pretrained(os.path.join(current_dir, '../SemanticCodeBERT'))
+        # tokenizer = AutoTokenizer.from_pretrained('../SemanticCodeBERT')
+        # bert = AutoModel.from_pretrained('../SemanticCodeBERT')
         bert.resize_token_embeddings(len(tokenizer) + 4)
         return bert
 

@@ -19,3 +19,5 @@ zendo_dataset/
 dataset_*
 embedding_bge
 embedding_codebert
+BERTOverflow
+SemanticCodeBERT

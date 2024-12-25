@@ -8,7 +8,7 @@ python model/main.py \
    --query_maxlen 256 \
    --doc_maxlen 256 \
    --special-tokens "QARC" \
-    --data-dpath "./data/"$name \
+   --data-dpath "./data/"$name \
    --triples "training_dataset_RN_commits.csv" \
    --config "BERTOverflow" &&
 python model/indexer.py \

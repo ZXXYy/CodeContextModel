@@ -23,7 +23,7 @@ logger = logging.getLogger('main')
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--special-tokens', choices=['QD', 'QARC', 'QARCL'], default='QARCL')
+    parser.add_argument('--special-tokens', choices=['QD', 'QARC', 'QARCL', 'CodeContext'], default='QARCL')
     parser.add_argument('--gpu', type=int, default=-1)  # -1 == CPU
     parser.add_argument('--n-epochs', type=int, default=4)
 
@@ -39,7 +39,8 @@ def parse_args():
     parser.add_argument('--accum', dest='accumsteps', default=2, type=int)
     parser.add_argument('--amp', dest='amp', default=True, action='store_true')
 
-    parser.add_argument('--triples', dest='triples', default='training_dataset_RN_hunks.csv')
+    # parser.add_argument('--triples', dest='triples', default='training_dataset_RN_hunks.csv')
+    parser.add_argument('--step', type=int, default=1, help='expand step')
     parser.add_argument('--data-dpath', dest='data_dpath', default='../../../data/zxing')
     parser.add_argument('--config', choices=['BERTOverflow', 'BERT', 'CodeBERT'], default='BERTOverflow')
 
@@ -50,7 +51,8 @@ def train(args, device):
     set_seed(1234, deterministic=False)
 
     args.config = get_config(args.config)
-    args.granularity = args.triples.split('_')[-1][:-4]
+    # args.granularity = args.triples.split('_')[-1][:-4]
+    args.granularity = None
 
     reader = EagerBatcher(args)
 

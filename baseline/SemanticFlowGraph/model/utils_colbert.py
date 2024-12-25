@@ -42,7 +42,9 @@ def get_config(config):
         config = 'bert-base-uncased'
         logger.info('Running with BERT NL')
     elif config == 'BERTOverflow':
-        config = '../BERTOverflow'
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        config = os.path.join(current_dir, '../BERTOverflow')
+        # config = '../BERTOverflow'
         logger.info('Running with BERTOverflow')
     elif config == 'CodeBERT':
         config = 'microsoft/codebert-base'
