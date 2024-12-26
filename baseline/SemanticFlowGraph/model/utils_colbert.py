@@ -10,7 +10,7 @@ logger = logging.getLogger('utils')
 
 def get_model_name(args):
     project_name = args.data_dpath.split('/')[-1]
-    training_set = args.triples.split('/')[-1].split('_')[-2]
+    # training_set = args.triples.split('/')[-1].split('_')[-2]
     if 'bert-base-uncased' in args.config:
         config = 'bertbase'
     elif 'BERTOverflow' in args.config:
@@ -18,8 +18,8 @@ def get_model_name(args):
     elif 'codebert' in args.config:
         config = 'codebert'
     return 'model_SemanticCodebert_' + '_'.join(
-        [project_name, training_set, config, args.special_tokens, 'q' + str(args.query_maxlen),
-         'd' + str(args.doc_maxlen), 'dim' + str(args.dim), args.similarity, args.granularity])
+        [project_name, config, args.special_tokens, 'q' + str(args.query_maxlen),
+         'd' + str(args.doc_maxlen), 'dim' + str(args.dim), args.similarity])
 
 
 def create_directory(path):

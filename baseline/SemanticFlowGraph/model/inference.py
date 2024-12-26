@@ -4,7 +4,7 @@ from SemanticCodebert import SemanticCodebert
 from manager import MixedPrecisionManager
 from tokenizer import QueryTokenizer, DocTokenizer
 from utils_colbert import get_special_tokens
-
+from indexer import load_colbert
 
 class ModelInference:
     def __init__(self, colbert: SemanticCodebert, args, amp=False):
@@ -13,7 +13,8 @@ class ModelInference:
         self.special_tokens = get_special_tokens(args.checkpoint)
         self.emb_cmp = args.embeddings_comparison
         self.colbert = colbert
-        self.query_tokenizer = QueryTokenizer(self.colbert.config, args.query_maxlen)
+        # self.query_tokenizer = QueryTokenizer(self.colbert.config, args.query_maxlen)
+        self.query_tokenizer = DocTokenizer(self.colbert.config, args.doc_maxlen, self.special_tokens)
         self.doc_tokenizer = DocTokenizer(self.colbert.config, args.doc_maxlen, self.special_tokens)
 
         self.amp_manager = MixedPrecisionManager(amp)
@@ -95,3 +96,135 @@ def _stack_3D_tensors(groups):
         offset = endpos
 
     return output
+
+def load_test_cases(args):
+    project_name = args.data_dpath.split('/')[-1]
+    train_test_index_path = os.path.join(
+        os.path.dirname(self.data_dpath), 
+        'train_test_index', 
+        project_name, 
+        'test_index.json'
+    )
+    reader = json.load(open(train_test_index_path))
+    reader = [x.replace('repo_first_3', project_name) for x in self.reader]
+
+    expanded_model_path = os.path.join(line, f"{self.step}_step_seeds_expanded_model.xml")
+    model_dir = expanded_model_path.split('/')[-2]
+    codes_path = os.path.join(line, f"my_java_codes.tsv")
+    df_code = pd.read_csv(codes_path, sep='\t')
+    if not os.path.exists(expanded_model_path):
+        continue
+
+    tree = ET.parse(expanded_model_path)
+    root = tree.getroot()
+    nodes = root.findall(".//vertex")
+
+    queries, total_hunks, labels = "", [], []
+    for test_case in reader:
+        hunks = []
+        for vertex in nodes:
+            node_id = '_'.join([model_dir, vertex.get('kind'), vertex.get('ref_id')]) 
+            code = df_code[df_code['id'] == node_id]['code'].values[0]
+            if vertex.get('seed', '0') == '1':
+                query += code + ' [UNUSED_6] '
+            elif vertex.get('origin', '0') == '1':
+                hunks.append(code + ' [UNUSED_6] ')
+                labels.append(1)
+            else:
+                hunks.append(code + ' [UNUSED_6] ')
+                labels.append(0)
+
+        queries.append(query)
+        total_hunks.append(hunks)
+    
+    return queries, total_hunks, labels
+
+def compute_mrr(scores, labels):
+    mrr = 0
+    topk = min(100, len(labels))
+    topk_indices = torch.topk(scores, topk).indices.flatten() 
+    # print(f"topk_indices shape: {topk_indices.shape}")
+    # print(topk_indices)
+    for i, item in enumerate(topk_indices):
+        label = labels[topk_indices[i]]
+        if label == 1:
+            mrr = 1 / (i + 1)
+            return {'MRR': mrr}
+    return {'MRR': 0}
+
+def compute_metrics(scores, labels):
+    total_hit = {}
+    for i in range(1, TOPK+1):
+        total_hit[f'top{i}_hit'] = 0
+    total_hit['mrr'] = 0
+    
+    for topk in range(1, TOPK+1):
+        topk_indices, _ = scores.topk(topk)
+        hit = 0
+        for i in range(0, len(topk_indices)):
+            label = labels[topk_indices[i]] # get the index of the top3 embeddings
+            if label == 1:
+                hit += 1
+                break
+        total_hit[f"top{topk}_hit"] += 1 if hit > 0 else 0
+
+    mrr = compute_mrr(scores, labels)
+    total_hit['mrr'] += mrr['MRR']
+
+    return total_hit
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--gpu', default=0, type=int)
+    parser.add_argument('--similarity', dest='similarity', default='cosine', choices=['cosine', 'l2'])
+    parser.add_argument('--dim', dest='dim', default=128, type=int)
+    parser.add_argument('--query-maxlen', dest='query_maxlen', default=256, type=int)
+    parser.add_argument('--doc-maxlen', dest='doc_maxlen', default=256, type=int)
+    parser.add_argument('--mask-punctuation', dest='mask_punctuation', default=True, action='store_true')
+
+    parser.add_argument('--embeddings-comparison', choices=['average', 'token'], default='average')
+    parser.add_argument('--checkpoint', dest='checkpoint',
+                        default='../../../data/zxing/model_ColBERT_zxing_hunks_bertoverflow_QARCL_q256_d256_dim128_cosine_hunk')
+
+    parser.add_argument('--data-dpath', dest='data_dpath', default='../../../data/zxing')
+
+
+if __name__ == '__main__':
+
+    parser = parse_args()
+    args = parser.parse_args()
+    device = args.gpu
+
+    args.config = get_config(args.config)
+    args.granularity = None
+
+    colbert = load_colbert(args, device).to(device)
+    inference = ModelInference(colbert, args, amp=args.amp)
+    colbert.eval()
+    
+    eval_hit_rate = {}
+    for i in range(1, 6):
+        eval_hit_rate[f'top{i}_hit'] = 0
+    eval_hit_rate['mrr'] = 0
+
+    queries, total_hunks, labels = load_test_cases(args)
+    for i, query in enumerate(queries):
+        passages = total_hunks[i]
+        labels = labels[i]
+        with torch.no_grad():
+            Q = inference.queryFromText(query, bsize=None, to_cpu=True)
+            D = inference.docFromText(passages, bsize=None, to_cpu=True)
+            scores = inference.score(Q, D, to_cpu=True) 
+            # get topk scores and indices
+            total_hit = compute_metrics(scores, labels)
+            eval_hit_rate = {k: eval_hit_rate[k] + metrics[k] for k in metrics}
+    
+    eval_hit_rate = {"eval_"+k: v / len(queries) for k, v in eval_hit_rate.items()}
+    print(f"Test finished, Test Metrics {eval_hit_rate}")
+                
+
+
+
+
+    
