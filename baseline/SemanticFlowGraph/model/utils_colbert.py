@@ -32,8 +32,9 @@ def create_directory(path):
 
 
 def get_special_tokens(config):
-    tokens = config.split('/')[-1].split('_')[5]
-    assert tokens == 'QARCL' or tokens == 'QARC' or tokens == 'QD' or tokens == 'QARCD'
+    print(config)
+    tokens = config.split('/')[-1].split('_')[4]
+    assert tokens == 'QARCL' or tokens == 'QARC' or tokens == 'QD' or tokens == 'QARCD' or tokens == 'CodeContext'
     return tokens
 
 
