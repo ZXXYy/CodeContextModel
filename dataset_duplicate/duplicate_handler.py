@@ -1,7 +1,10 @@
 import argparse
 import json
 import os
+import threading
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
+from itertools import combinations
 from os import path
 
 import pandas as pd
@@ -23,23 +26,72 @@ def calculate_bleu_nltk(reference_code, candidate_code):
     return score
 
 
+# def build_similar_code_clusters(code_snippets, similarity_threshold=0.8):
+#     print("<--- start Build similar code clusters...")
+#     n = len(code_snippets)
+#     uf = unionfind(n)
+#
+#     total = 0
+#     count = 0
+#     for i in range(n):
+#         for j in range(i + 1, n):
+#             total += 1
+#             bleu_score = calculate_bleu_nltk(code_snippets[i], code_snippets[j])
+#             if bleu_score >= similarity_threshold:
+#                 print("find one similar code cluster", i, j, bleu_score)
+#                 count += 1
+#                 uf.unite(i, j)
+#     print("number of compared code snippets: ", total)
+#     print("number of similar code snippets: ", count)
+#     print("---> end build similar code clusters...")
+#     return uf
+
 def build_similar_code_clusters(code_snippets, similarity_threshold=0.8):
     print("<--- start Build similar code clusters...")
     n = len(code_snippets)
     uf = unionfind(n)
+    lock = threading.Lock()  # 用于保护 uf 操作的线程安全
+    lock1 = threading.Lock()  # 用于保护 uf 操作的线程安全
 
-    total = 0
-    count = 0
-    for i in range(n):
-        for j in range(i + 1, n):
-            total += 1
-            bleu_score = calculate_bleu_nltk(code_snippets[i], code_snippets[j])
-            if bleu_score >= similarity_threshold:
-                print("find one similar code cluster", i, j, bleu_score)
-                count += 1
+    cache = dict()
+
+    # 定义线程任务
+    def process_pair(i, j):
+        # bleu_score = calculate_bleu_nltk(code_snippets[i], code_snippets[j])
+        reference_code = code_snippets[i]
+        candidate_code = code_snippets[j]
+        if len(reference_code) < len(candidate_code):
+            reference_code, candidate_code = candidate_code, reference_code
+            i, j = j, i
+
+        def get_or_cache(index, code_tokens):
+            if index not in cache:
+                with lock1:
+                    if index not in cache:  # 防止重复写入
+                        cache[index] = word_tokenize(code_tokens)
+            return cache[index]
+
+        # 使用 get_or_cache 函数简化代码
+        reference_tokens = get_or_cache(i, reference_code)
+        candidate_tokens = get_or_cache(j, candidate_code)
+
+        smoothing_function = SmoothingFunction().method1
+        bleu_score = sentence_bleu([reference_tokens], candidate_tokens, smoothing_function=smoothing_function)
+
+        if bleu_score >= similarity_threshold:
+            with lock:  # 确保对 uf 的操作线程安全
                 uf.unite(i, j)
+                print("find one similar code cluster", i, j, bleu_score)
+
+    # 创建所有组合的索引对
+    all_pairs = list(combinations(range(n), 2))
+    total = len(all_pairs)
+
+    # 使用线程池执行任务
+    with ThreadPoolExecutor() as executor:
+        executor.map(lambda pair: process_pair(pair[0], pair[1]), all_pairs)
+
     print("number of compared code snippets: ", total)
-    print("number of similar code snippets: ", count)
     print("---> end build similar code clusters...")
     return uf
 
@@ -208,8 +260,8 @@ class CodeSimilarityAnalyzer:
 
         for project, v in all_index.items():  # model_id
             dup = []
-            for i in range(v[1]):
-                for j in range(i + 1, v[1]):
+            for i in range(len(v[1])):
+                for j in range(i + 1, len(v[1])):
                     test_index = v[1][i]
                     test_index_another = v[1][j]
                     test = data[project][test_index]  # [(idx, code),...]
