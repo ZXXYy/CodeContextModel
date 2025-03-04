@@ -1,5 +1,5 @@
 # code_context_model/run.sh
-python baseline/GNNAPIRec/train.py \
+python train.py \
 --train_batch_size 32 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
@@ -11,11 +11,11 @@ python baseline/GNNAPIRec/train.py \
 --lr 1e-5 \
 --seed 42 \
 --device 0 \
---do_test \
---test_model_pth "/data2/xiaoyez/CodeContextModel/GNNAPIRec/model_output/12-19-16-32/model_10.pth" 
+--do_train \
+--debug
+# --do_test \
+# --test_model_pth "/data2/xiaoyez/CodeContextModel/GNNAPIRec/model_output/12-19-16-32/model_10.pth" 
 # --do_test 
-# --do_train \
-
 
 # debug
 # python code_context_model/train.py \

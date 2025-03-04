@@ -415,9 +415,7 @@ if __name__ == "__main__":
     # data_builder = ExpandGraphDataset(xml_files=xml_files, embedding_dir=args.embedding_dir, embedding_model='BgeEmbedding', device=device, debug=args.debug)
     # # 切分数据集
     # train_dataset, valid_dataset, test_dataset = split_dataset(data_builder)
-    train_dataset = torch.load(os.path.join(args.input_dirs[0], 'train_dataset.pt'))
-    valid_dataset = torch.load(os.path.join(args.input_dirs[0], 'valid_dataset.pt'))
-    test_dataset = torch.load(os.path.join(args.input_dirs[0], 'test_dataset.pt'))
+    
     # test_dataset = valid_dataset + train_dataset
 
     # for i, data in enumerate(test_dataset):
@@ -426,22 +424,22 @@ if __name__ == "__main__":
     #     if i in [152, 188, 270, 478, 529]:
     #         logger.info(graph.ndata['feat'].shape)
     #         logger.info(xml_file)
-
-    for i in range(1, len(args.input_dirs)):
-        train_dataset = train_dataset + torch.load(os.path.join(args.input_dirs[i], 'train_dataset.pt'))
-        valid_dataset = valid_dataset + torch.load(os.path.join(args.input_dirs[i], 'valid_dataset.pt'))
-        test_dataset = test_dataset + torch.load(os.path.join(args.input_dirs[i], 'test_dataset.pt'))
-
-    if args.debug:
-        train_dataset = [train_dataset[i] for i in list(range(64))]  
-        valid_dataset = [valid_dataset[i] for i in list(range(16))] 
-        test_dataset = [test_dataset[i] for i in list(range(16))] 
-
-    # 使用 DataLoader 加载子集
-    train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
-    valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
-    test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=False, collate_fn=dgl.batch)
-    logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}, Test: {len(test_dataset)}")
+    if args.do_train:
+        train_dataset = torch.load(os.path.join(args.input_dirs[0], 'train_dataset.pt'))
+        valid_dataset = torch.load(os.path.join(args.input_dirs[0], 'valid_dataset.pt'))
+        if args.debug:
+            train_dataset = [train_dataset[i] for i in list(range(64))]  
+            valid_dataset = [valid_dataset[i] for i in list(range(16))] 
+        train_loader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, collate_fn=dgl.batch)
+        valid_loader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=True, collate_fn=dgl.batch)
+        logger.info(f"Load dataset finished, Train: {len(train_dataset)}, Valid: {len(valid_dataset)}")
+    if args.do_test:
+        test_dataset = torch.load(os.path.join(args.input_dirs[0], 'test_dataset.pt'))
+        if args.debug:
+            test_dataset = [test_dataset[i] for i in list(range(16))] 
+        # 使用 DataLoader 加载子集
+        test_loader = DataLoader(test_dataset, batch_size=args.test_batch_size, shuffle=False, collate_fn=dgl.batch)
+        logger.info(f"Load dataset finished, Test: {len(test_dataset)}")
 
     # # 定义模型
     num_dims = 1024 # bge embedding dims
@@ -478,20 +476,20 @@ if __name__ == "__main__":
     if args.do_test:
         logger.info(f"test model path: {args.test_model_pth}")
         old_state_dict = torch.load(args.test_model_pth)
-        # mapping = {
-        #     'conv1': 'conv_layers.0',
-        #     'conv2': 'conv_layers.1',
-        #     'conv3': 'conv_layers.2'
-        # }
-        # new_state_dict = {}
-        # for old_key, value in old_state_dict.items():
-        #     for old_prefix, new_prefix in mapping.items():
-        #         if old_key.startswith(old_prefix):
-        #             new_key = old_key.replace(old_prefix, new_prefix)
-        #             new_state_dict[new_key] = value
+        mapping = {
+            'conv1': 'conv_layers.0',
+            'conv2': 'conv_layers.1',
+            'conv3': 'conv_layers.2'
+        }
+        new_state_dict = {}
+        for old_key, value in old_state_dict.items():
+            for old_prefix, new_prefix in mapping.items():
+                if old_key.startswith(old_prefix):
+                    new_key = old_key.replace(old_prefix, new_prefix)
+                    new_state_dict[new_key] = value
 
         # 加载重命名后的 state_dict 到新模型
-        model.load_state_dict(old_state_dict, strict=True)
+        model.load_state_dict(new_state_dict, strict=True)
         # model.load_state_dict(torch.load(args.test_model_pth))
         test(
             model=model, 

@@ -1,5 +1,5 @@
 python model/main.py \
-   --gpu 0 \
+   --gpu 1 \
    --n-epochs 30 \
    --dim 128 \
    --bsize 32 \
@@ -7,4 +7,5 @@ python model/main.py \
    --doc_maxlen 256 \
    --special-tokens "CodeContext" \
    --data-dpath "/data0/xiaoyez/CodeContextModel/data/mylyn" \
-   --config "BERTOverflow"
+   --config "BERTOverflow" \
+   --step 3

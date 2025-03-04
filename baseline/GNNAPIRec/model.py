@@ -2,8 +2,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-# from layer import GraphConv
+# from layer import GraphConv‘
+from enum import Enum
 from dgl.nn import GraphConv
+
+# node label 和 code_context_model/build_dataset.py 中的保持一致
+class NodeLabel(Enum):
+    SEED = -1
+    CONTEXT = 1
+    NON_CONTEXT = 0
+    NEG_CONTEXT = 2
 
 class GCNRec(nn.Module):
 
@@ -48,13 +56,22 @@ class GCNRec(nn.Module):
     
     def rnn_encoding(self, embedding_index):
         # (node_sz, seq_len, 64)
+        print(f"embedding_index shape: {embedding_index.shape}")
+        print(f"embedding_index: {embedding_index}")
+        print(f"max: {max(embedding_index)}")
+        print(f"{self.word_emb.weight.shape}")
+
         emb = self.word_emb(embedding_index)
-        # Create mask for non-zero elements (assuming padding_idx=0)
-        non_zero_mask = (embedding_index != 0).unsqueeze(-1)  # (node_sz, seq_len, 1)
-        # Calculate mean only for non-zero elements
-        sum_embeddings = (emb * non_zero_mask).sum(dim=1)  # (node_sz, emb_dim)
-        count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  # (node_sz, 1)
-        emb = sum_embeddings / count_non_zero  # (node_sz, emb_dim)
+        # print(f"emb shape: {emb.shape}")
+        # # Create mask for non-zero elements (assuming padding_idx=0)
+        # non_zero_mask = (embedding_index != 0).unsqueeze(-1)  # (node_sz, seq_len, 1)
+        # # Calculate mean only for non-zero elements
+        # sum_embeddings = (emb * non_zero_mask).sum(dim=1)  # (node_sz, emb_dim)
+        # count_non_zero = non_zero_mask.sum(dim=1).clamp(min=1)  # (node_sz, 1)
+        # print(f"count_non_zeros shape: {count_non_zero.shape}")
+        # emb = sum_embeddings / count_non_zero  # (node_sz, emb_dim)
+        # print(f"emb shape: {emb.shape}")
+        # print(f"emb: {emb[0]}")
         rnn_out, hidden = self.rnn(emb)
         # (node_sz, 64)
         return hidden[-1]
@@ -85,11 +102,12 @@ class GCNRec(nn.Module):
             mean_emb, mask = self._get_mean_embeddings(node_type, pos_emb_by_type, embedding_index, node_labels)
             pos_emb[mask] = mean_emb
 
-        set_pos_emb_by_type(-1, self.user_pos_emb.weight)
-        set_pos_emb_by_type(1, self.item_pos_emb.weight)
-        set_pos_emb_by_type(0, self.other_pos_emb.weight)
-        set_pos_emb_by_type(2, self.other_pos_emb.weight)
+        set_pos_emb_by_type(NodeLabel.SEED.value, self.user_pos_emb.weight)
+        set_pos_emb_by_type(NodeLabel.CONTEXT.value, self.item_pos_emb.weight)
+        set_pos_emb_by_type(NodeLabel.NON_CONTEXT.value, self.other_pos_emb.weight)
+        set_pos_emb_by_type(NodeLabel.NEG_CONTEXT.value, self.other_pos_emb.weight)
 
+        print(f"pos_emb shape: {pos_emb.shape}")
         all_emb = pos_emb + self.rnn_encoding(embedding_index)
         h_emb = []
         conv_emb = F.dropout(self.conv1(graph, all_emb),
@@ -144,19 +162,19 @@ class GCNRec(nn.Module):
         """
         out_emb = self.refine_embedding(graph, node_labels, embedding_index)
         # print(f"out_emb shape: {out_emb.shape}")
-        # 随机选出一个seed作为user
-        user_idx = (node_labels == -1).nonzero().squeeze()
+        # 选出eed作为user
+        user_idx = (node_labels == NodeLabel.SEED).nonzero().squeeze()
         user_x = F.embedding(user_idx, out_emb)
         user_x = user_x.unsqueeze(0) if len(user_x.shape) == 1 else user_x
         # print(f"user_x shape: {user_x.shape}")
 
-        pos_idx = (node_labels == -1).nonzero().squeeze()
+        pos_idx = (node_labels == NodeLabel.CONTEXT).nonzero().squeeze()
         pos_item_x = F.embedding(pos_idx, out_emb)  # (2, seq_len, emb_dim) 最终获得的嵌入表示
         pos_item_x = pos_item_x.unsqueeze(0) if len(pos_item_x.shape) == 1 else pos_item_x
         # print(f"pos_item_x shape: {pos_item_x.shape}")
 
         # node_labels == 2的节点是负样本
-        neg_idxes = (node_labels == 2).nonzero().squeeze()
+        neg_idxes = (node_labels == NodeLabel.NEG_CONTEXT).nonzero().squeeze()
         neg_item_x = F.embedding(neg_idxes, out_emb)  # (2, seq_len, emb_dim) 最终获得的嵌入表示
         # print(f"neg_item_x shape: {neg_item_x.shape}")
        

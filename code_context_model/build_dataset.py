@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 import xml.etree.ElementTree as ET
 
+from enum import Enum
 from dgl.data import DGLDataset
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
@@ -32,6 +33,17 @@ edge_label = {
     "inherits": 2,
     "implements": 3,
 }
+
+# enum for node label
+class NodeLabel(Enum):
+    SEED: int = -1
+    CONTEXT: int = 1
+    NON_CONTEXT: int = 0
+    NEG_CONTEXT: int = 2
+
+    @classmethod
+    def to_tensor(cls, labels):
+        return torch.tensor([label.value if isinstance(label, cls) else label for label in labels])
 
 class ExpandGraphDataset(DGLDataset):
     def __init__(self, xml_files, embedding_dir, embedding_model, debug=False):
@@ -59,10 +71,13 @@ class ExpandGraphDataset(DGLDataset):
 
             # 获取顶点
             vertices = graph_element.find('vertices')
+            # filter the graph with too many vertices
+            # if len(vertices.findall('vertex')) > 400:
+            #     continue
             vertex_ids = [int(vertex.get('id')) for vertex in vertices.findall('vertex')]
             id_map = {v: i for i, v in enumerate(vertex_ids)}
             vertex_features = []
-            vertex_labels = []
+            vertex_labels: list[NodeLabel] = []
             vertex_ids = []
             
             vertex_stereotypes = []
@@ -76,12 +91,14 @@ class ExpandGraphDataset(DGLDataset):
                     node_embedding = node_embedding[0]
                 vertex_features.append(node_embedding)
                 if vertex.get('seed', '0') == '1':
-                    vertex_labels.append(-1)
+                    vertex_labels.append(NodeLabel.SEED) # seed node
                 else:
                     if vertex.get('origin', '0') == '1':
-                        vertex_labels.append(1)
+                        vertex_labels.append(NodeLabel.CONTEXT) # non-seed context node
                     else:
-                        vertex_labels.append(0)
+                        vertex_labels.append(NodeLabel.NON_CONTEXT) # non-context node
+                vertex_ids.append([int(model_dir), int(vertex.get('id', None))]) # file_id, vertex_id to locate 
+
                 ste = vertex.get('stereotype', None)
                 if ste:
                     if  ste not in ste2id.keys():
@@ -90,37 +107,37 @@ class ExpandGraphDataset(DGLDataset):
                     vertex_stereotypes.append(ste_id)
                 else:
                     vertex_stereotypes.append(-1)
-                vertex_ids.append([int(model_dir), int(vertex.get('id', None))]) # file_id, vertex_id to locate 
+                
 
-            
+            # handle data for GAPI
             if self.embedding_model == 'word2vec':
                 def find_indices(lst, val):
                     return [i for i, x in enumerate(lst) if x == val]
                 
-                # 从vertex_labels中选取任意两个个label为0的节点，把他们的label设置为
-                neg_indices = find_indices(vertex_labels, 0)
+                # 从vertex_labels中选取任意两个个label为0的节点，把他们的label设置为2
+                # 为了适配GAPI训练中的负样本，需要生成两个负样本
+                neg_indices = find_indices(vertex_labels, NodeLabel.NON_CONTEXT)
                 if len(neg_indices) < 2:
                     continue
                 neg_indices = random.sample(neg_indices, 2)
-                vertex_labels[neg_indices[0]] = 2
-                vertex_labels[neg_indices[1]] = 2
+                vertex_labels[neg_indices[0]] = NodeLabel.NEG_CONTEXT
+                vertex_labels[neg_indices[1]] = NodeLabel.NEG_CONTEXT
                 
                 # 从vertex_labels中选取任意一个label为-1的节点保留，把其他label为-1的节点的label设置为0
-                seed_indices = find_indices(vertex_labels, -1)
+                seed_indices = find_indices(vertex_labels, NodeLabel.SEED)
                 random_peak = random.randint(0, len(seed_indices)-1)
                 for i in seed_indices:
                     if i != random_peak:
-                        vertex_labels[seed_indices[i]] = 0
+                        vertex_labels[seed_indices[i]] = NodeLabel.NON_CONTEXT
                 
-                assert len(find_indices(vertex_labels, -1)) == 1
-                assert len(find_indices(vertex_labels, 1)) == 1
-                assert len(find_indices(vertex_labels, 2)) == 2
+                assert len(find_indices(vertex_labels, NodeLabel.SEED)) == 1
+                assert len(find_indices(vertex_labels, NodeLabel.NEG_CONTEXT)) == 2
             
             # print(vertex_features)
             # logger.info(f"Read vertex_features features len: {len(vertex_features)}")
             # 将顶点特征转换为张量
             node_features = torch.tensor(vertex_features)
-            node_labels = torch.tensor(vertex_labels)
+            node_labels = NodeLabel.to_tensor(vertex_labels)
             node_stes = torch.tensor(vertex_stereotypes)
             node_ids = torch.tensor(vertex_ids)
             # 获取边
@@ -213,10 +230,10 @@ if __name__ == '__main__':
     # ======== command run example ========
     # python code_context_model/build_dataset.py \
     # --input_dir /data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn \
-    # --embedding_dir "/data2/xiaoyez/CodeContextModel/embedding/mylyn/word2vec" \
-    # --output_dir "/data2/xiaoyez/CodeContextModel/dataset_word2vec_step1" \
+    # --embedding_dir "/data2/xiaoyez/CodeContextModel/embedding_bge" \
+    # --output_dir "/data2/xiaoyez/CodeContextModel/dataset_cross_file_step1" \
     # --step 1 \
-    # --embedding_model "word2vec"
+    # --embedding_model "BgeEmbedding"
     # =====================================
     
     parser = argparse.ArgumentParser()

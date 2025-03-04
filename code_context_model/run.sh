@@ -4,8 +4,8 @@ python code_context_model/train.py \
 --train_batch_size 32 \
 --valid_batch_size 1 \
 --test_batch_size 1 \
---input_dirs  "/data0/xiaoyez/CodeContextModel/dataset_platform_bge_step1"  \
---embedding_dir "/data0/xiaoyez/CodeContextModel/embedding_bge" \
+--input_dirs  "/data2/xiaoyez/CodeContextModel/dataset_cross_file_step1"  \
+--embedding_dir "/data2/xiaoyez/CodeContextModel/embedding_bge" \
 --output_dir "/data0/xiaoyez/CodeContextModel/model_output" \
 --num_epochs 50 \
 --lr 1e-6 \
@@ -15,7 +15,7 @@ python code_context_model/train.py \
 --gnn_layers 3 \
 --seed 42 \
 --device 0 \
---test_model_pth "/data0/xiaoyez/CodeContextModel/model_output/08-27-20-02/model_48.pth" \
+--test_model_pth "/data0/xiaoyez/CodeContextModel/model_output/07-14-00-19/model_48.pth" \
 --do_test 
 # --do_train
 

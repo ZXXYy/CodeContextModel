@@ -173,12 +173,15 @@ def load_test_cases(args):
             else:
                 hunks.append(code + ' [UNUSED_6] ')
                 labels.append(0)
-            if len(hunks) > 300:
+            if len(hunks) > 400:
                 break
-
-        queries.append([query])
-        total_hunks.append(hunks)
-        total_labels.append(labels)
+        if len(hunks) > 0 and len(query) > 0:
+            queries.append([query])
+            total_hunks.append(hunks)
+            total_labels.append(labels)
+        else:
+            logger.info(f"skip {expanded_model_path} because it has no hunks or query")
+            
         # logger.info(f"{expanded_model_path} - hunks: {len(hunks)}")
     
     return queries, total_hunks, total_labels
