@@ -324,6 +324,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
 def test(model, test_loader, **kwargs):
     logger.info("======= Start testing =======")
     threshold = kwargs.get('threshold', 0.5)
+    device = kwargs.get('device', 0)
 
     model.eval()
     with torch.no_grad():
@@ -345,15 +346,15 @@ def test(model, test_loader, **kwargs):
             # non_seed_logits = logits.squeeze(1)[non_seed_indices]
             # non_seed_labels = batch_graphs.ndata['label'].float()[non_seed_indices]
             metrics = compute_metrics(logits, batch_graphs.ndata['label'], batch_graphs.batch_num_nodes().tolist())
-            if metrics[f"top{TOPK}_hit"] == 0:
-                CASE_NOT_TOPK_HIT.append(i)
-                logger.info(f"{i}: #nodes={batch_graphs.ndata['feat'].shape} #edges={batch_graphs.edata['label'].shape}")
+            # if metrics[f"top{TOPK}_hit"] == 0:
+            #     CASE_NOT_TOPK_HIT.append(i)
+            #     logger.info(f"{i}: #nodes={batch_graphs.ndata['feat'].shape} #edges={batch_graphs.edata['label'].shape}")
             # logger.info(f"Test Batch {i}: Metrics {metrics}")
             test_hit_rate = {k: test_hit_rate[k] + metrics[k] for k in metrics}
         
         test_hit_rate = {k: v / len(test_loader) for k, v in test_hit_rate.items()}
         logger.info(f"Test finished, Test Metrics {test_hit_rate}")
-    
+        return test_hit_rate
 
 if __name__ == "__main__":
 
@@ -494,7 +495,8 @@ if __name__ == "__main__":
         test(
             model=model, 
             test_loader=test_loader, 
-            threshold=args.threshold
+            threshold=args.threshold,
+            device=device
         )
         
 

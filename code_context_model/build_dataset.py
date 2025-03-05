@@ -177,7 +177,7 @@ class ExpandGraphDataset(DGLDataset):
                 logger.info(f"nodes: {len(vertices)}")
 
 
-        logger.info(ste2id)
+        logger.debug(ste2id)
             
 
     def __getitem__(self, idx):

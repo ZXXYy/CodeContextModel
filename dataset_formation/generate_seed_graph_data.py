@@ -1,4 +1,5 @@
 import os
+import sys  
 import itertools
 import logging
 import random
@@ -12,6 +13,8 @@ import pandas as pd
 from tqdm import tqdm
 from graphviz import Digraph
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.xmltree_parser import XMLTreeParser
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('SEED')
@@ -95,8 +98,8 @@ def form_expand_graph(new_nodes, new_edges, old_xml_graph):
     graph = old_xml_graph
     max_nodes_id = len(old_xml_graph.findall(".//vertex"))-1
     new_graph = ET.Element("graph", attrib={
-        "repo_name": graph.get('repo_name'),
-        "repo_path": graph.get('repo_path')
+        "repo_name": graph.get('repo_name') if graph.get('repo_name') is not None else "",
+        "repo_path": graph.get('repo_path') if graph.get('repo_path') is not None else "",
     })
     # create graph meta info
     new_root.append(new_graph)
@@ -114,7 +117,7 @@ def form_expand_graph(new_nodes, new_edges, old_xml_graph):
     new_tree = ET.ElementTree(new_root)
     return new_tree
 
-def generate_expanded_graph_from_seed(root, cc_id, seeds, outdir, steps=1):
+def generate_expanded_graph_from_seed(root, seeds, outdir, outpath="", steps=1):
     logger.debug(seeds)
     new_edges = []
     new_nodes = []
@@ -159,11 +162,14 @@ def generate_expanded_graph_from_seed(root, cc_id, seeds, outdir, steps=1):
         target = edge.get('end')
         if source in vertex_ids and target in vertex_ids and edge not in new_edges:
             new_edges.append(edge)
-    
+
     # write new graph to file
     logger.debug(f"new_nodes: {len(new_nodes)}, new_edges: {len(new_edges)}")
     new_tree = form_expand_graph(new_nodes, new_edges, root)
-    new_tree.write(f"{outdir}/{steps}_step_seeds_expanded_model.xml", encoding='utf-8', xml_declaration=True)
+    parser = XMLTreeParser(new_tree)
+    parser.check_element_recursively(new_tree.getroot())
+    outpath = outpath if outpath else f"{outdir}/{steps}_step_seeds_expanded_model.xml"
+    new_tree.write(outpath, encoding='utf-8', xml_declaration=True)
 
 def collaspe_variables(expanded_model_path, code_path, model_dir, outdir, step):
     if not os.path.exists(expanded_model_path):
@@ -276,12 +282,12 @@ def generate_big_graphs(input_path, step=1):
 def generate_seed_expanded_graphs(input_path, step=1):
     """
     根据seed生成扩展图，保存到seed_expanded文件夹下
-    new_x_step_expanded_model.xml -> x_step_seeds_expanded_model.xml
+    big_x_step_expanded_model.xml -> x_step_seeds_expanded_model.xml
     """
     context_models = os.listdir(input_path)
     for context_model in tqdm(context_models):
         logger.debug(f"Processing {context_model}")
-        context_model_path = f"{input_path}/{context_model}/new_{step}_step_expanded_model.xml"
+        context_model_path = f"{input_path}/{context_model}/big_{step}_step_expanded_model.xml"
         if not os.path.exists(context_model_path):
             logger.error(f"{context_model_path} not exists")
             continue
@@ -296,7 +302,7 @@ def generate_seed_expanded_graphs(input_path, step=1):
             index = random.randint(0, len(seeds) - 1) 
             seed = seeds[index]
             logger.debug(f"Seed: {seed}")
-            generate_expanded_graph_from_seed(graph, cc_id, seed, outdir=f"{input_path}/{context_model}", steps=step)
+            generate_expanded_graph_from_seed(graph, seed, outdir=f"{input_path}/{context_model}", steps=step)
 
         # for i, seed in enumerate(seeds):
         #     logger.debug(f"Seed: {seed}")
@@ -447,9 +453,9 @@ if __name__ == '__main__':
         generate_seed_expanded_graphs(args.input_dir, args.step)
         logger.info(f"=====Seed expanded graphs generated successfully=====")
 
-        logger.info(f"=====start to generate collapsed variable graphs from {args.input_dir}=====")
-        generate_variable_collapsed_graphs(args.input_dir, args.step)
-        logger.info(f"=====Collasped variable graphs generated successfully=====")
+        # logger.info(f"=====start to generate collapsed variable graphs from {args.input_dir}=====")
+        # generate_variable_collapsed_graphs(args.input_dir, args.step)
+        # logger.info(f"=====Collasped variable graphs generated successfully=====")
 
     elif args.action == 'statistics':
         # 使用下述代码获取数据集中变量/函数/类的统计信息
