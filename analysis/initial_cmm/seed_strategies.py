@@ -24,7 +24,7 @@ class CountBasedStrategy(SeedStrategy):
         """
         self.seed_count = seed_count
 
-    def generate_seed(self, graph: XMLTreeParser, step: int = 1) -> List[tuple]:
+    def generate_seed(self, graph: XMLTreeParser, step: int = 1) -> Optional[List[tuple]]:
         vertex_ids = []
         # get vertex in code context model
         for vertex in graph.get_vertices():
@@ -42,8 +42,30 @@ class CountBasedStrategy(SeedStrategy):
         # seed = seeds[index]
         seed = tuple(random.sample(vertex_ids, seed_size))
 
-        return seed
+        return [seed]
     
+class OrderBasedStrategy(SeedStrategy):
+    """按照指定顺序选择种子的策略"""
+    def __init__(self, seed_count: int = 5):
+        self.seed_count = seed_count
+
+    def generate_seed(self, graph: XMLTreeParser, step: int = 1) -> Optional[List[tuple]]:
+        vertex_ids = []
+        # get vertex in code context model
+        for vertex in graph.get_vertices():
+            if graph.is_origin_vertex(vertex):
+                vertex_ids.append(graph.get_vertex_id(vertex))
+            
+        # 确定种子数量
+        seed_size = self.seed_count if self.seed_count is not None else len(vertex_ids) - step
+        if len(vertex_ids) - seed_size < 1:   # 确保至少留下一个种子节点用于预测
+            return None
+        
+        # select seed_size vertices as seed
+        seeds = list(itertools.combinations(vertex_ids, seed_size))
+        num_selections = min(self.seed_count, len(seeds))
+        selected_seeds = random.sample(seeds, num_selections)
+        return selected_seeds
     
 class ExperienceBasedStrategy(SeedStrategy):
     """基于程序员经验的种子选择策略"""

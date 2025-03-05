@@ -17,13 +17,13 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from seed_strategies import CountBasedStrategy
+from seed_strategies import CountBasedStrategy, OrderBasedStrategy
 from utils.xmltree_parser import XMLTreeParser
 from dataset_formation.generate_seed_graph_data import generate_expanded_graph_from_seed
 from code_context_model.build_dataset import ExpandGraphDataset
 from code_context_model.gnn import RGCN
 from code_context_model.train import test
-from results_visualize import visualize_count_based_results
+from results_visualize import visualize_count_based_results, visualize_order_based_results
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
@@ -46,45 +46,46 @@ def generate_initial_seed(test_case, seed_strategy, num_seed=1) -> List[tuple]:
         graph = XMLTreeParser(os.path.join(test_case, CCM_EXPANDED_GRAPH_FILE))
         initial_seed = seed_strategy.generate_seed(graph)
         return initial_seed
+    elif seed_strategy == "order_based":
+        seed_strategy = OrderBasedStrategy(num_seed)
+        graph = XMLTreeParser(os.path.join(test_case, CCM_EXPANDED_GRAPH_FILE))
+        initial_seeds = seed_strategy.generate_seed(graph)
+        return initial_seeds
     elif seed_strategy == "experience_based":
         pass
     else:
         raise ValueError(f"Invalid seed strategy: {seed_strategy}")
     return initial_seed
 
-def generate_expanded_ccm_from_seed(initial_seed, seed_strategy, test_case, num_seed):
+def generate_expanded_ccm_from_seed(initial_seed, seed_strategy, test_case, expanded_ccm_id):
+    # expanded_ccm_id 在count_based中是num_seed, 在order_based中是initial_seed的index
     graph = XMLTreeParser(os.path.join(test_case, CCM_EXPANDED_GRAPH_FILE))
-    if seed_strategy == "count_based":
-        test_case_id = test_case.split("/")[-1]
-        outdir = os.path.join(INITIAL_CCM_DIR, "count_based", "raw_data", test_case_id)
-        if not os.path.exists(outdir):
-            os.makedirs(outdir)
-        if os.path.exists(os.path.join(outdir, f"{num_seed}_seed_expanded_model.xml")):
-            return os.path.join(outdir, f"{num_seed}_seed_expanded_model.xml")
-        # print(os.path.join(outdir, f"{num_seed}_seed_expanded_model.xml"))
-        generate_expanded_graph_from_seed(
-            graph.root, 
-            initial_seed, 
-            outdir=outdir, 
-            outpath=os.path.join(outdir, f"{num_seed}_seed_expanded_model.xml")
-        )
-        return os.path.join(outdir, f"{num_seed}_seed_expanded_model.xml")
-    elif seed_strategy == "experience_based":
-        pass
-    else:
-        raise ValueError(f"Invalid seed strategy: {seed_strategy}")
-    pass
+    test_case_id = test_case.split("/")[-1]
+    outdir = os.path.join(INITIAL_CCM_DIR, seed_strategy, "raw_data", test_case_id)
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
+    if os.path.exists(os.path.join(outdir, f"{expanded_ccm_id}_seed_expanded_model.xml")):
+        return os.path.join(outdir, f"{expanded_ccm_id}_seed_expanded_model.xml")
+    # print(os.path.join(outdir, f"{num_seed}_seed_expanded_model.xml"))
+    generate_expanded_graph_from_seed(
+        graph.root, 
+        initial_seed, 
+        outdir=outdir, 
+        outpath=os.path.join(outdir, f"{expanded_ccm_id}_seed_expanded_model.xml")
+    )
+    return os.path.join(outdir, f"{expanded_ccm_id}_seed_expanded_model.xml")
+    
 
-def build_dataset(xml_files, seed_strategy, num_seed):
-    if os.path.exists(os.path.join(INITIAL_CCM_DIR, seed_strategy, "dataset", f"{num_seed}_seed_dataset.pt")):
-        return os.path.join(INITIAL_CCM_DIR, seed_strategy, 'dataset', f"{num_seed}_seed_dataset.pt")
+def build_dataset(xml_files, seed_strategy, expanded_ccm_id):
+    if os.path.exists(os.path.join(INITIAL_CCM_DIR, seed_strategy, "dataset", f"{expanded_ccm_id}_seed_dataset.pt")):
+        return os.path.join(INITIAL_CCM_DIR, seed_strategy, 'dataset', f"{expanded_ccm_id}_seed_dataset.pt")
     test_dataset = ExpandGraphDataset(
         xml_files=xml_files, 
         embedding_dir=EMBEDDING_DIR, 
         embedding_model=EMBEDDING_MODEL, 
         debug=False
     )
-    outfile = f"{num_seed}_seed_dataset.pt" if num_seed else "dataset.pt"
+    outfile = f"{expanded_ccm_id}_seed_dataset.pt" if expanded_ccm_id else "dataset.pt"
     if not os.path.exists(os.path.join(INITIAL_CCM_DIR, seed_strategy, "dataset")):
         os.makedirs(os.path.join(INITIAL_CCM_DIR, seed_strategy, "dataset"))
     torch.save(test_dataset,  os.path.join(INITIAL_CCM_DIR, seed_strategy, "dataset", outfile))
@@ -138,15 +139,34 @@ def run_count_based_initial_ccm(test_cases, args):
                 initial_seed = generate_initial_seed(test_case, "count_based", num_seed)
                 if initial_seed is None:
                     continue
-                expanded_ccm = generate_expanded_ccm_from_seed(initial_seed, "count_based", test_case, num_seed)
+                expanded_ccm = generate_expanded_ccm_from_seed(initial_seed[0], "count_based", test_case, num_seed)
                 expanded_ccms.append(expanded_ccm)
             dataset_path = build_dataset(expanded_ccms, "count_based", num_seed)
             test_hit_rate = inference_dataset(dataset_path, args)
             test_hit_rates[num_seed] = test_hit_rate
-            write_result(test_hit_rates, "count_based")    
+        write_result(test_hit_rates, "count_based")    
          
     results = json.load(open(os.path.join(INITIAL_CCM_DIR, "count_based", "result.json")))
     visualize_count_based_results(results, os.path.join(INITIAL_CCM_DIR, "count_based", "visualization"))
+
+def run_order_based_initial_ccm(test_cases, args):
+    if not os.path.exists(os.path.join(INITIAL_CCM_DIR, "order_based", "result.json")):
+        test_hit_rates = defaultdict(list)
+        for test_case in tqdm(test_cases):
+            test_case_id = test_case.split("/")[-1]
+            initial_seeds = generate_initial_seed(test_case, "order_based", 5)
+            if initial_seeds is None:
+                continue
+            for index, initial_seed in enumerate(initial_seeds):
+                expanded_ccm = generate_expanded_ccm_from_seed(initial_seed, "order_based", test_case, index)
+                dataset_path = build_dataset([expanded_ccm], "order_based", f"{test_case_id}_{index}")
+                test_hit_rate = inference_dataset(dataset_path, args)
+                test_hit_rates[test_case_id].append(test_hit_rate)
+        write_result(test_hit_rates, "order_based")
+    
+    results = json.load(open(os.path.join(INITIAL_CCM_DIR, "order_based", "result.json")))
+    visualize_order_based_results(results, os.path.join(INITIAL_CCM_DIR, "order_based", "visualization"))
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate initial CCM')
@@ -160,6 +180,8 @@ if __name__ == "__main__":
     test_cases = [case.replace("/data0/xiaoyez/CodeContextModel/data/repo_first_3/", "/data0/xiaoyez/CodeContextModel/data/mylyn/") for case in test_cases]
     if args.seed_strategy == "count_based":
         run_count_based_initial_ccm(test_cases, args)
+    elif args.seed_strategy == "order_based":
+        run_order_based_initial_ccm(test_cases, args)
     elif args.seed_strategy == "experience_based":
         pass
     else:
