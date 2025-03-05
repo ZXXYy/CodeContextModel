@@ -129,6 +129,25 @@ def write_result(test_hit_rates, seed_strategy):
     with open(os.path.join(INITIAL_CCM_DIR, seed_strategy, f"result.json"), "w") as f:
         json.dump(test_hit_rates, f)
 
+def run_count_based_initial_ccm(test_cases, args):
+    if not os.path.exists(os.path.join(INITIAL_CCM_DIR, "count_based", "result.json")):
+        test_hit_rates = defaultdict(list)
+        for num_seed in range(1, 16):
+            expanded_ccms = []
+            for test_case in tqdm(test_cases):
+                initial_seed = generate_initial_seed(test_case, "count_based", num_seed)
+                if initial_seed is None:
+                    continue
+                expanded_ccm = generate_expanded_ccm_from_seed(initial_seed, "count_based", test_case, num_seed)
+                expanded_ccms.append(expanded_ccm)
+            dataset_path = build_dataset(expanded_ccms, "count_based", num_seed)
+            test_hit_rate = inference_dataset(dataset_path, args)
+            test_hit_rates[num_seed] = test_hit_rate
+            write_result(test_hit_rates, "count_based")    
+         
+    results = json.load(open(os.path.join(INITIAL_CCM_DIR, "count_based", "result.json")))
+    visualize_count_based_results(results, os.path.join(INITIAL_CCM_DIR, "count_based", "visualization"))
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate initial CCM')
     parser.add_argument('--seed_strategy', type=str, default="step_based", help='seed strategy')
@@ -140,22 +159,7 @@ if __name__ == "__main__":
     test_cases = json.load(open(os.path.join(test_dir, "test_index.json")))
     test_cases = [case.replace("/data0/xiaoyez/CodeContextModel/data/repo_first_3/", "/data0/xiaoyez/CodeContextModel/data/mylyn/") for case in test_cases]
     if args.seed_strategy == "count_based":
-        if not os.path.exists(os.path.join(INITIAL_CCM_DIR, args.seed_strategy, "result.json")):
-            test_hit_rates = defaultdict(list)
-            for num_seed in range(1, 16):
-                expanded_ccms = []
-                for test_case in tqdm(test_cases):
-                    initial_seed = generate_initial_seed(test_case, args.seed_strategy, num_seed)
-                    if initial_seed is None:
-                        continue
-                    expanded_ccm = generate_expanded_ccm_from_seed(initial_seed, args.seed_strategy, test_case, num_seed)
-                    expanded_ccms.append(expanded_ccm)
-                dataset_path = build_dataset(expanded_ccms, args.seed_strategy, num_seed)
-                test_hit_rate = inference_dataset(dataset_path, args)
-                test_hit_rates[num_seed] = test_hit_rate
-                write_result(test_hit_rates, args.seed_strategy)     
-        results = json.load(open(os.path.join(INITIAL_CCM_DIR, args.seed_strategy, "result.json")))
-        visualize_count_based_results(results, os.path.join(INITIAL_CCM_DIR, args.seed_strategy, "visualization"))
+        run_count_based_initial_ccm(test_cases, args)
     elif args.seed_strategy == "experience_based":
         pass
     else:
