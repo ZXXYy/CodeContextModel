@@ -30,6 +30,7 @@ def get_bug_repot(bug_report_id: str):
             f.write(response.text)
     except Exception as e:
         logger.error(f"Error crawling bug report {bug_report_id}: {e}")
+        time.sleep(30)
 
 def handle_bug_report(bug_report_id: str):
     raw_file = os.path.join(METADATA_DIR, "raw", f"{bug_report_id}.html")

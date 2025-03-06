@@ -61,6 +61,9 @@ class ExpandGraphDataset(DGLDataset):
         for xml_file in tqdm(self.xml_files):
             model_dir = xml_file.split('/')[-2]
             embedding_path = os.path.join(self.embedding_dir, f"{model_dir}_{self.embedding_model}_embedding.pkl")
+            if not os.path.exists(embedding_path):
+                logger.info(f"embedding file not found: {embedding_path}")
+                continue
             # load embedding
             with open(embedding_path, 'rb') as f:
                 df_embeddings = pd.read_pickle(f)

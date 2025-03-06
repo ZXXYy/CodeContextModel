@@ -17,13 +17,15 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from seed_strategies import CountBasedStrategy, OrderBasedStrategy
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from .seed_strategies import CountBasedStrategy, OrderBasedStrategy
 from utils.xmltree_parser import XMLTreeParser
 from dataset_formation.generate_seed_graph_data import generate_expanded_graph_from_seed
 from code_context_model.build_dataset import ExpandGraphDataset
 from code_context_model.gnn import RGCN
 from code_context_model.train import test
-from results_visualize import visualize_count_based_results, visualize_order_based_results
+from .results_visualize import visualize_count_based_results, visualize_order_based_results
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)

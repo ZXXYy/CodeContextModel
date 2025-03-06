@@ -41,6 +41,9 @@ class XMLTreeParser:
     def get_vertex_id(self, vertex):
         return vertex.get('id')
     
+    def get_bug_id(self):
+        return self.root.get('bug_id')
+    
     def is_origin_vertex(self, vertex):
         return vertex.get('origin') == '1'
     
