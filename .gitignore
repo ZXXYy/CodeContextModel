@@ -21,3 +21,5 @@ embedding_bge
 embedding_codebert
 BERTOverflow
 SemanticCodeBERT
+metadata/bug_report_metadata/raw
+metadata/bug_report_metadata/processed
