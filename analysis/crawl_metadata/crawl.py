@@ -58,6 +58,17 @@ def handle_bug_report(bug_report_id: str):
             "content": comment_content
         })
     bug_metadata["comments"] = comments
+    modified_th = soup.find("th", class_="field_label", string=lambda t: "Modified:" in str(t))
+    if modified_th:
+        modified_td = modified_th.find_parent("tr").find("td")
+        if modified_td:
+            modified_time = modified_td.get_text().strip()
+            modified_time = modified_time.split("(")[0].strip()
+            bug_metadata["modified_date"] = modified_time
+        else:
+            bug_metadata["modified_date"] = "Unknown"
+    else:
+        bug_metadata["modified_date"] = "Unknown"
     
     logger.debug(bug_metadata["summary"])
     logger.debug(bug_metadata["assignee"])
