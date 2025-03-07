@@ -10,7 +10,9 @@ import torch
 import dgl
 import argparse
 import logging
+import numpy as np
 import xml.etree.ElementTree as ET
+
 from typing import List, Tuple, Optional
 from collections import defaultdict
 from tqdm import tqdm
@@ -19,13 +21,13 @@ from torch.utils.data import DataLoader
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from .seed_strategies import CountBasedStrategy, OrderBasedStrategy
+from seed_strategies import CountBasedStrategy, OrderBasedStrategy, ExperienceBasedStrategy
 from utils.xmltree_parser import XMLTreeParser
 from dataset_formation.generate_seed_graph_data import generate_expanded_graph_from_seed
 from code_context_model.build_dataset import ExpandGraphDataset
 from code_context_model.gnn import RGCN
 from code_context_model.train import test
-from .results_visualize import visualize_count_based_results, visualize_order_based_results
+from results_visualize import visualize_count_based_results, visualize_order_based_results
 
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger(__name__)
@@ -54,7 +56,10 @@ def generate_initial_seed(test_case, seed_strategy, num_seed=1) -> List[tuple]:
         initial_seeds = seed_strategy.generate_seed(graph)
         return initial_seeds
     elif seed_strategy == "experience_based":
-        pass
+        seed_strategy = ExperienceBasedStrategy(test_case.split("/")[-1])
+        graph = XMLTreeParser(os.path.join(test_case, CCM_EXPANDED_GRAPH_FILE))
+        initial_seed = seed_strategy.generate_seed(graph)
+        return initial_seed
     else:
         raise ValueError(f"Invalid seed strategy: {seed_strategy}")
     return initial_seed
@@ -169,6 +174,39 @@ def run_order_based_initial_ccm(test_cases, args):
     results = json.load(open(os.path.join(INITIAL_CCM_DIR, "order_based", "result.json")))
     visualize_order_based_results(results, os.path.join(INITIAL_CCM_DIR, "order_based", "visualization"))
 
+def run_experience_based_initial_ccm(test_cases, args):
+    if not os.path.exists(os.path.join(INITIAL_CCM_DIR, "experience_based", "result.json")):
+        test_hit_rates = defaultdict(list)
+        have_experience_based_seed_count, have_experience_based_cases = 0, []
+        seeds_num_list = []
+        expanded_ccms = []
+        for test_case in tqdm(test_cases):
+            test_case_id = test_case.split("/")[-1]
+            initial_seed = generate_initial_seed(test_case, "experience_based")
+            if initial_seed is None:
+                continue            
+            have_experience_based_seed_count += 1
+            expanded_ccm = generate_expanded_ccm_from_seed(initial_seed[0], "experience_based", test_case, "experience_based")
+            expanded_ccms.append(expanded_ccm)
+            have_experience_based_cases.append(test_case_id)
+            seeds_num_list.append(len(initial_seed[0]))
+        dataset_path = build_dataset(expanded_ccms, "experience_based", "experience_based")
+        test_hit_rate = inference_dataset(dataset_path, args)
+        test_hit_rates["experience_based"] = test_hit_rate
+
+        step_1_expanded_ccms = [os.path.join(
+            '/data0/xiaoyez/CodeContextModel/data/mylyn',
+            case_id, 
+            "1_step_seeds_expanded_model.xml"
+        ) for case_id in have_experience_based_cases]
+        step_1_dataset_path = build_dataset(step_1_expanded_ccms, "experience_based", "non_experience_based_step_1")
+        step_1_test_hit_rate = inference_dataset(step_1_dataset_path, args)
+        test_hit_rates["non_experience_based_step_1"] = step_1_test_hit_rate
+
+        write_result(test_hit_rates, "experience_based")
+        print(f"have {have_experience_based_seed_count}/{len(test_cases)} experience based seeds")
+        print(f"seeds num list: {np.quantile(seeds_num_list, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99])}")
+    # results = json.load(open(os.path.join(INITIAL_CCM_DIR, "experience_based", "result.json")))
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate initial CCM')
@@ -185,7 +223,7 @@ if __name__ == "__main__":
     elif args.seed_strategy == "order_based":
         run_order_based_initial_ccm(test_cases, args)
     elif args.seed_strategy == "experience_based":
-        pass
+        run_experience_based_initial_ccm(test_cases, args)
     else:
         raise ValueError(f"Invalid seed strategy: {args.seed_strategy}")
     # results = infer_expanded_ccms(expanded_ccms, mylyn_dir, test_dir)

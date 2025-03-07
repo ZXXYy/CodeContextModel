@@ -63,21 +63,24 @@ def get_view_edit_stats(ccm_id: str, wp_id: str):
             elif event_kind == "edit":
                 edit_times.append(event_time)
                 edit_count += 1
-        logger.debug(
-            f"{vertex_label}:\n"
-            f"  #views: {view_count}\n"
-            f"  #edits: {edit_count}\n" 
+            logger.debug(
+                f"{vertex_label}:\n"
+                f"  #views: {view_count}\n"
+                f"  #edits: {edit_count}\n" 
             f"  avg_view: {sum(view_times) / view_count if view_count > 0 else 0:.2f}\n"
             f"  avg_edit: {sum(edit_times) / edit_count if edit_count > 0 else 0:.2f}"
         )
+        # if vertex_label == solve_one(events[len(events) - 1].get("event_structure_handle", ""))[1]:
+        #     if edit_count == 0 and view_count == 1:
+        #         continue
         stats.append({
             "ccm_id": ccm_id,
             "wp_id": wp_id,
             "vertex_label": vertex_label,
             "view_count": view_count,
             "edit_count": edit_count,
-            "avg_view": sum(view_times) / view_count if view_count > 0 else 0,
-            "avg_edit": sum(edit_times) / edit_count if edit_count > 0 else 0
+            "sum_view": sum(view_times),
+            "sum_edit": sum(edit_times)
         })
     return stats
 if __name__ == "__main__":
@@ -91,4 +94,20 @@ if __name__ == "__main__":
 
     total_stats_df = pd.DataFrame(total_stats)
     total_stats_df.to_csv(os.path.join(METADATA_DIR, f"{PROJECT_NAME}_view_edit_stats.csv"), index=False)
-
+    
+    VIEW_THRESHOLD = 3
+    VIEW_COUNT_THRESHOLD = 1
+    print(total_stats_df.describe())
+    non_zero_edit_count = len(total_stats_df[total_stats_df['edit_count'] > 0])
+    print(f"non-zero edit count: {non_zero_edit_count}")
+    zero_edit_view_gt_count = len(total_stats_df.loc[(total_stats_df['edit_count'] == 0) & (total_stats_df['view_count'] > VIEW_COUNT_THRESHOLD)])
+    print(f"zero edit but view count > {VIEW_COUNT_THRESHOLD}: {zero_edit_view_gt_count}")
+    df_zero_edit_view_lt = total_stats_df.loc[(total_stats_df['edit_count'] == 0) & (total_stats_df['view_count'] <= VIEW_COUNT_THRESHOLD)]
+    zero_edit_view_lt_avg_view_gt_threshold_count = len(df_zero_edit_view_lt.loc[df_zero_edit_view_lt['sum_view'] > VIEW_THRESHOLD])
+    print(f"zero edit but view count <= {VIEW_COUNT_THRESHOLD} and sum view > {VIEW_THRESHOLD}s: {zero_edit_view_lt_avg_view_gt_threshold_count}")
+    # print(df_zero_edit_view_lt_3.describe())
+    non_misnavigation_count = non_zero_edit_count + zero_edit_view_gt_count + zero_edit_view_lt_avg_view_gt_threshold_count
+    print(f"total: {non_misnavigation_count} / {len(total_stats_df)} {non_misnavigation_count / len(total_stats_df):.2%}")
+    df_misnavigation = df_zero_edit_view_lt.loc[df_zero_edit_view_lt['sum_view'] < VIEW_THRESHOLD]
+    df_misnavigation.to_csv(os.path.join(METADATA_DIR, f"{PROJECT_NAME}_misnavigation.csv"), index=False)
+    # print(len(df_misnavigation["ccm_id"].unique()))
