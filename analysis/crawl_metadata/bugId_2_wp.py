@@ -8,7 +8,7 @@ from collections import defaultdict
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from utils.xmltree_parser import XMLTreeParser
 # /data2/shunliu/pythonfile/code_context_model_prediction/params_validation/repo_vs_commit_order/IQR_code_timestamp/05/Mylyn
-PROJECT_NAME = "Mylyn"
+PROJECT_NAME = "PDE"
 CODE_CONTEXT_MODEL_ID_DIR = os.path.join(
     "/data2/shunliu/pythonfile/code_context_model_prediction", 
     "params_validation",

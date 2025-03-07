@@ -38,6 +38,12 @@ class XMLTreeParser:
                 vertices_count.append(int(vertices.get('total', 0)))
         return vertices_count
     
+    def get_events(self):
+        return self.root.findall('event')
+
+    def get_event_end_time(self):
+        return self.root.find('timestamp').get('last')
+
     def get_vertex_id(self, vertex):
         return vertex.get('id')
     

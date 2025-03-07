@@ -86,7 +86,7 @@ def handle_bug_report(bug_report_id: str):
     return bug_metadata
 
 if __name__ == "__main__":
-    bug_report_dir = "/data2/shunliu/pythonfile/code_context_model_prediction/2023_dataset/mylyn_zip/Platform"
+    bug_report_dir = "/data2/shunliu/pythonfile/code_context_model_prediction/2023_dataset/mylyn_zip/PDE"
     if not os.path.exists(METADATA_DIR):
         os.makedirs(METADATA_DIR)
 
