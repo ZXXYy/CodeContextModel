@@ -323,6 +323,7 @@ def train(model: RGCN, train_loader, valid_loader, verbose=True, **kwargs):
 
 def test(model, test_loader, **kwargs):
     logger.info("======= Start testing =======")
+    start_time = time.time()
     threshold = kwargs.get('threshold', 0.5)
     device = kwargs.get('device', 0)
 
@@ -354,6 +355,7 @@ def test(model, test_loader, **kwargs):
         
         test_hit_rate = {k: v / len(test_loader) for k, v in test_hit_rate.items()}
         logger.info(f"Test finished, Test Metrics {test_hit_rate}")
+        logger.info(f"Test time: {time.time() - start_time}")
         return test_hit_rate
 
 if __name__ == "__main__":

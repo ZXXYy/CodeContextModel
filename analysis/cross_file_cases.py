@@ -3,6 +3,7 @@ import sys
 import json
 import argparse
 import torch
+import time
 
 import xml.etree.ElementTree as ET
 
