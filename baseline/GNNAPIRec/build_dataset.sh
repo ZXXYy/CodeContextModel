@@ -1,1 +1,6 @@
-python code_context_model/build_dataset.py     --input_dir /data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn    --embedding_dir "/data2/xiaoyez/CodeContextModel/embedding/mylyn/word2vec"    --output_dir "/data2/xiaoyez/CodeContextModel/dataset_word2vec_step2"    --step 2     --embedding_model "word2vec"
+python /data0/xiaoyez/CodeContextModel/code_context_model/build_dataset.py     \
+--input_dir /data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn    \
+--embedding_dir "/data2/xiaoyez/CodeContextModel/embedding/mylyn/word2vec"    \
+--output_dir "/data2/xiaoyez/CodeContextModel/dataset_word2vec_step3"    \
+--step 3     \
+--embedding_model "word2vec"

@@ -56,11 +56,11 @@ class GCNRec(nn.Module):
     
     def rnn_encoding(self, embedding_index):
         # (node_sz, seq_len, 64)
-        print(f"embedding_index shape: {embedding_index.shape}")
-        print(f"embedding_index: {embedding_index}")
-        print(f"max: {torch.max(embedding_index).item()}")
-        print(f"vocab_sz: {self.word_emb.weight.shape[0]}")
-        print(f"{self.word_emb.weight.shape}")
+        # print(f"embedding_index shape: {embedding_index.shape}")
+        # print(f"embedding_index: {embedding_index}")
+        # print(f"max: {torch.max(embedding_index).item()}")
+        # print(f"vocab_sz: {self.word_emb.weight.shape[0]}")
+        # print(f"{self.word_emb.weight.shape}")
 
         emb = self.word_emb(embedding_index)
         # print(f"emb shape: {emb.shape}")
@@ -108,7 +108,7 @@ class GCNRec(nn.Module):
         set_pos_emb_by_type(NodeLabel.NON_CONTEXT.value, self.other_pos_emb.weight)
         set_pos_emb_by_type(NodeLabel.NEG_CONTEXT.value, self.other_pos_emb.weight)
 
-        print(f"pos_emb shape: {pos_emb.shape}")
+        # print(f"pos_emb shape: {pos_emb.shape}")
         all_emb = pos_emb + self.rnn_encoding(embedding_index)
         h_emb = []
         conv_emb = F.dropout(self.conv1(graph, all_emb),
@@ -162,7 +162,7 @@ class GCNRec(nn.Module):
         :return: loss
         """
         out_emb = self.refine_embedding(graph, node_labels, embedding_index)
-        print(f"out_emb shape: {out_emb.shape}")
+        # print(f"out_emb shape: {out_emb.shape}")
         # 选出eed作为user
         user_idx = (node_labels == NodeLabel.SEED.value).nonzero().squeeze()
         user_x = F.embedding(user_idx, out_emb)
