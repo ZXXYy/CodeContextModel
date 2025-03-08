@@ -4,15 +4,14 @@ python train.py \
 --valid_batch_size 1 \
 --test_batch_size 1 \
 --neg_sz 2 \
---pretrained_emb_path "/data0/xiaoyez/CodeContextModel/word2vec.pretrain" \
+--pretrained_emb_path "/data0/xiaoyez/CodeContextModel/baseline/GNNAPIRec/word2vec.pretrain" \
 --input_dirs  "/data2/xiaoyez/CodeContextModel/dataset_word2vec_step1"  \
 --output_dir "/data2/xiaoyez/CodeContextModel/GNNAPIRec/model_output" \
 --num_epochs 50 \
 --lr 1e-5 \
 --seed 42 \
 --device 0 \
---do_train \
---debug
+--do_train 
 # --do_test \
 # --test_model_pth "/data2/xiaoyez/CodeContextModel/GNNAPIRec/model_output/12-19-16-32/model_10.pth" 
 # --do_test 

@@ -9,8 +9,10 @@ class LexParser:
         self.sents = sents
         self.dim = dim
         if os.path.exists(pretrain_model_path):
+            print(f"load pretrained model from {pretrain_model_path}")
             self.model = Word2Vec.load(pretrain_model_path)
         else:
+            print(f"no pretrained model found, train from scratch")
             self.model = self.__pretrain()
             self.model.save('word2vec.pretrain')
         self.pre_embedding = [np.zeros(self.dim, dtype=np.float32)]

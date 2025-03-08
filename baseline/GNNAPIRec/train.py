@@ -119,6 +119,9 @@ def compute_metrics(model, graph, node_feats, node_labels):
     
 def train(train_loader, valid_loader, verbose=True, **kwargs):
     pretrained_emb_path = kwargs.get('pretrained_emb_path', None)
+    if pretrained_emb_path is None:
+        assert False, "pretrained_emb_path is None"
+
     lr = kwargs.get('lr', 0.01)
     num_epochs = kwargs.get('num_epochs', 50)
     output_dir = kwargs.get('output_dir', 'output')
@@ -126,7 +129,7 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
     debug = kwargs.get('debug', False)
 
 
-    parser = LexParser(pretrained_emb_path)
+    parser = LexParser(sents=None, pretrain_model_path=pretrained_emb_path)
     pre_emb = torch.stack([torch.from_numpy(emb) for emb in parser.pre_embedding]).to(device)
 
     model = GCNRec(len(parser.vocab), pre_emb).to(device)
@@ -294,6 +297,7 @@ if __name__ == "__main__":
             train_loader=train_loader, 
             valid_loader=valid_loader, 
             verbose=False, 
+            pretrained_emb_path=args.pretrained_emb_path,
             lr=args.lr,
             num_epochs=args.num_epochs,
             output_dir=args.output_dir,

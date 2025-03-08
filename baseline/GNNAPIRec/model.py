@@ -58,7 +58,8 @@ class GCNRec(nn.Module):
         # (node_sz, seq_len, 64)
         print(f"embedding_index shape: {embedding_index.shape}")
         print(f"embedding_index: {embedding_index}")
-        print(f"max: {max(embedding_index)}")
+        print(f"max: {torch.max(embedding_index).item()}")
+        print(f"vocab_sz: {self.word_emb.weight.shape[0]}")
         print(f"{self.word_emb.weight.shape}")
 
         emb = self.word_emb(embedding_index)
@@ -161,20 +162,20 @@ class GCNRec(nn.Module):
         :return: loss
         """
         out_emb = self.refine_embedding(graph, node_labels, embedding_index)
-        # print(f"out_emb shape: {out_emb.shape}")
+        print(f"out_emb shape: {out_emb.shape}")
         # 选出eed作为user
-        user_idx = (node_labels == NodeLabel.SEED).nonzero().squeeze()
+        user_idx = (node_labels == NodeLabel.SEED.value).nonzero().squeeze()
         user_x = F.embedding(user_idx, out_emb)
         user_x = user_x.unsqueeze(0) if len(user_x.shape) == 1 else user_x
         # print(f"user_x shape: {user_x.shape}")
 
-        pos_idx = (node_labels == NodeLabel.CONTEXT).nonzero().squeeze()
+        pos_idx = (node_labels == NodeLabel.CONTEXT.value).nonzero().squeeze()
         pos_item_x = F.embedding(pos_idx, out_emb)  # (2, seq_len, emb_dim) 最终获得的嵌入表示
         pos_item_x = pos_item_x.unsqueeze(0) if len(pos_item_x.shape) == 1 else pos_item_x
         # print(f"pos_item_x shape: {pos_item_x.shape}")
 
         # node_labels == 2的节点是负样本
-        neg_idxes = (node_labels == NodeLabel.NEG_CONTEXT).nonzero().squeeze()
+        neg_idxes = (node_labels == NodeLabel.NEG_CONTEXT.value).nonzero().squeeze()
         neg_item_x = F.embedding(neg_idxes, out_emb)  # (2, seq_len, emb_dim) 最终获得的嵌入表示
         # print(f"neg_item_x shape: {neg_item_x.shape}")
        

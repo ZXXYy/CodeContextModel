@@ -80,11 +80,11 @@ def get_word_corpus(input_dir, debug=False):
 
     return corpus
 
-def build_word_embedding(corpus, min_count=1):
-    parser = LexParser(corpus)
+def build_word_embedding(corpus, min_count=1, pretrain_model_path=None):
+    parser = LexParser(corpus, pretrain_model_path=pretrain_model_path)
     return parser
 
-def embedding_index_inference(input_dir, output_dir, parser, debug=False):
+def embedding_index_inference(input_dir, output_dir, lex_parser: LexParser, debug=False):
     id_dirs = sorted(os.listdir(input_dir))
     id_dirs = id_dirs[:10] if debug else id_dirs
     corpus = []
@@ -101,7 +101,7 @@ def embedding_index_inference(input_dir, output_dir, parser, debug=False):
         # get node embedding
         df_code = get_nodes_text(expand_graph_path)
         codes = df_code["code"]
-        embeddings = [parser.get_embedding_index(code) for code in codes]
+        embeddings = [lex_parser.get_embedding_index(code) for code in codes]
         df_code.loc[:, 'embedding'] = embeddings   
         df_code = df_code.drop(columns=['code']) 
         # print(df_code)
@@ -109,7 +109,7 @@ def embedding_index_inference(input_dir, output_dir, parser, debug=False):
         # write embedding to file
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        output_fn = os.path.join(output_dir, f'{id_dir}_{parser.model_name}_embedding.pkl')
+        output_fn = os.path.join(output_dir, f'{id_dir}_{lex_parser.model_name}_embedding.pkl')
         df_code.to_pickle(output_fn)
         
 if __name__ == '__main__':
@@ -118,17 +118,21 @@ if __name__ == '__main__':
     # --input_dir /data0/xiaoyez/CodeContextModel/data/mylyn \
     # --output_dir /data2/xiaoyez/CodeContextModel/embedding/mylyn/word2vec 
 
+    # 读取Mylyn数据集，遍历每个xml文件，读取每个结点的code element
+    # 用word2vec推理，得到每个结点的embedding index
+    # 将embedding index写入到pickle文件中 作为训练输入
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--input_dir', type=str, default='data', help='input directory')
     parser.add_argument('--output_dir', type=str, default='data', help='output directory')
     parser.add_argument('--debug', action='store_true', help='debug mode')
     args = parser.parse_args()
 
-    pretrain_model_path = '/data0/xiaoyez/CodeContextModel/word2vec.pretrain'
+    pretrain_model_path = '/data0/xiaoyez/CodeContextModel/baseline/GNNAPIRec/word2vec.pretrain'
     if not os.path.exists(pretrain_model_path):
         corpus = get_word_corpus(args.input_dir, args.debug)
-        parser = build_word_embedding(corpus)
+        lex_parser = build_word_embedding(corpus, pretrain_model_path=pretrain_model_path)
     else:
-        parser = LexParser(None, pretrain_model_path=pretrain_model_path)
+        lex_parser = LexParser(None, pretrain_model_path=pretrain_model_path)
 
-    embedding_index_inference(args.input_dir, args.output_dir, parser, args.debug)
+    embedding_index_inference(args.input_dir, args.output_dir, lex_parser, args.debug)
