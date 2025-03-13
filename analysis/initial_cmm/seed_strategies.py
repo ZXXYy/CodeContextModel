@@ -41,7 +41,7 @@ class SeedStrategy(ABC):
 
 class CountBasedStrategy(SeedStrategy):
     """按照指定数量随机选择种子的策略"""
-    def __init__(self, seed_count: int = None, max_seed_count: int = None):
+    def __init__(self, seed_count: int = None, percentage: float = None, max_seed_count: int = None):
         """
         Parameters:
             seed_count: 指定要选择的种子节点数量。
@@ -49,6 +49,7 @@ class CountBasedStrategy(SeedStrategy):
         """
         self.seed_count = seed_count
         self.max_seed_count = max_seed_count
+        self.percentage = percentage
 
     def generate_seed(self, graph: XMLTreeParser, step: int = 1) -> Optional[List[tuple]]:
         vertex_ids = []
@@ -56,9 +57,11 @@ class CountBasedStrategy(SeedStrategy):
         for vertex in graph.get_vertices():
             if graph.is_origin_vertex(vertex):
                 vertex_ids.append(graph.get_vertex_id(vertex))
-            
-        # 确定种子数量
-        seed_size = self.seed_count if self.seed_count is not None else len(vertex_ids) - step
+        if self.percentage is not None:
+            seed_size = int(len(vertex_ids) * self.percentage)
+            logger.info(f"seed_size: {seed_size}, percentage: {self.percentage}")
+        else:
+            seed_size = self.seed_count if self.seed_count is not None else len(vertex_ids) - step
         logger.debug(f"seed_size: {seed_size}, seed_count: {self.seed_count}, max_seed_count: {self.max_seed_count}")
         logger.debug(f"len(vertex_ids): {len(vertex_ids)}")
         if self.seed_count is not None and len(vertex_ids) - self.seed_count < 1:   # 确保至少留下一个种子节点用于预测
@@ -135,9 +138,11 @@ class ExperienceBasedStrategy(SeedStrategy):
         "/data0/xiaoyez/CodeContextModel/data",
         PROJECT_NAME if PROJECT_NAME != "Mylyn" else "mylyn"
     )
-    def __init__(self, ccm_id: str):
+    def __init__(self, ccm_id: str, delta_days: int = 7):
         self.ccm_id = int(ccm_id) # 根据当前的cmm_id，检索相同assignee之前的cmm_id
+        self.delta_days = delta_days
         self.experience_elements = self.load_experience_elements()
+
 
     def load_experience_elements(self):
         experience_elements = []
@@ -150,7 +155,7 @@ class ExperienceBasedStrategy(SeedStrategy):
         ccm_metadata = ccm_metadata[ccm_metadata["assignee"] == assignee]
         ccm_metadata["end_time"] = pd.to_datetime(ccm_metadata["end_time"])
         ccm_metadata = ccm_metadata[ccm_metadata["end_time"] < start_time]
-        ccm_metadata = ccm_metadata[ccm_metadata["end_time"] > start_time - timedelta(days=7)]
+        ccm_metadata = ccm_metadata[ccm_metadata["end_time"] > start_time - timedelta(days=self.delta_days)]
         logger.debug(f"{assignee} has {len(ccm_metadata)} previous ccm")
         for index, row in ccm_metadata.iterrows():
             code_context_model = os.path.join(self.CODE_CONTEXT_MODEL_FINAL_DIR, str(row["ccm_id"]), "code_context_model.xml")

@@ -18,7 +18,7 @@ def visualize_count_based_results(results: dict, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     
     # 提取数据
-    seed_counts = sorted([int(k) for k in results.keys()])
+    seed_counts = sorted([float(k) for k in results.keys()])
     metrics = {
         'hits': {
             'top1_hit': [],
@@ -47,9 +47,18 @@ def visualize_count_based_results(results: dict, output_dir: str):
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
     markers = ['o', 's', '^', 'D', 'v']
     
+    # Convert seed counts to percentages
+    seed_counts_pct = [x * 100 for x in seed_counts]
+    
+    # Update x-axis ticks and labels
+    ax1.set_xticks(seed_counts_pct)
+    ax1.set_xticklabels([f'{int(x)}%' for x in seed_counts_pct])
+    ax2.set_xticks(seed_counts_pct)
+    ax2.set_xticklabels([f'{int(x)}%' for x in seed_counts_pct])
+    
     # 绘制Hit Rate指标
     for i, (metric, values) in enumerate(metrics['hits'].items()):
-        ax1.plot(seed_counts, values, 
+        ax1.plot(seed_counts_pct, values, 
                 label=hit2label[metric],
                 marker=markers[i],
                 color=colors[i],
@@ -57,7 +66,7 @@ def visualize_count_based_results(results: dict, output_dir: str):
                 markersize=8)
     
     # 绘制MRR指标
-    ax2.plot(seed_counts, metrics['ranking']['mrr'],
+    ax2.plot(seed_counts_pct, metrics['ranking']['mrr'],
             label='MRR',
             marker=markers[0],
             color=colors[0],
@@ -65,20 +74,16 @@ def visualize_count_based_results(results: dict, output_dir: str):
             markersize=8)
     
     # 设置第一个子图属性 (Hit Rates)
-    ax1.set_xlabel('Number of Seed Nodes', fontsize=14)
+    ax1.set_xlabel('Percentage of Seed Nodes', fontsize=14)
     ax1.set_ylabel('Topk Recall', fontsize=14)
     ax1.grid(True, linestyle='--', alpha=0.7)
-    ax1.legend(fontsize=12, loc='lower right')
-    ax1.set_xticks(seed_counts)
-    ax1.set_ylim(0.4, 1.0)
+    ax1.legend(fontsize=12, loc='lower left')
     
     # 设置第二个子图属性 (MRR)
-    ax2.set_xlabel('Number of Seed Nodes', fontsize=14)
+    ax2.set_xlabel('Percentage of Seed Nodes', fontsize=14)
     ax2.set_ylabel('MRR', fontsize=14)
     ax2.grid(True, linestyle='--', alpha=0.7)
-    ax2.legend(fontsize=12, loc='lower right')
-    ax2.set_xticks(seed_counts)
-    ax2.set_ylim(0.4, 1.0)
+    ax2.legend(fontsize=12, loc='lower left')
     
     # 保存图像
     plt.tight_layout()
@@ -165,3 +170,71 @@ def visualize_order_based_results(results: dict, output_dir: str):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "variance_distribution.png"), dpi=300)
     print(variances_df.describe())
+
+def visualize_experience_based_results(results: dict, output_dir: str):
+    """
+    可视化基于经验和非基于经验的结果对比
+    
+    Parameters:
+        results: 包含不同时间窗口的评估指标结果的字典
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 提取时间窗口
+    delta_days = [int(key.split('_')[-1]) for key in results.keys()]
+    
+    # 准备数据
+    exp_metrics = {
+        'mrr': [],
+        'top1_hit': [],
+        'top3_hit': [],
+        'top5_hit': []
+    }
+    non_exp_metrics = {
+        'mrr': [],
+        'top1_hit': [],
+        'top3_hit': [],
+        'top5_hit': []
+    }
+
+    # 收集数据
+    for day_key in sorted(results.keys()):
+        for metric in exp_metrics.keys():
+            exp_metrics[metric].append(results[day_key]['experience_based'][metric])
+            non_exp_metrics[metric].append(results[day_key]['non_experience_based'][metric])
+
+    # 创建两个子图
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+    # 绘制MRR对比
+    ax1.plot(delta_days, exp_metrics['mrr'], 'o-', label='Experience-based', color='#2ca02c')
+    ax1.plot(delta_days, non_exp_metrics['mrr'], 's-', label='Non-experience-based', color='#1f77b4')
+    ax1.set_xlabel('Time Window (days)', fontsize=12)
+    ax1.set_ylabel('MRR', fontsize=12)
+    ax1.set_title('MRR Comparison between Experience and Non-Experience', fontsize=14)
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.legend(fontsize=10)
+    ax1.set_ylim(0, 1)
+
+    # 绘制Recall@K对比
+    markers = ['o', 's', '^']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+    
+    for i, k in enumerate([1, 3, 5]):
+        metric = f'top{k}_hit'
+        ax2.plot(delta_days, exp_metrics[metric], f'{markers[i]}-', 
+                label=f'R@{k} based on experience', color=colors[i], linestyle='--')
+        ax2.plot(delta_days, non_exp_metrics[metric], f'{markers[i]}-',
+                label=f'R@{k} based on non-experience', color=colors[i])
+
+    ax2.set_xlabel('Time Window (days)', fontsize=12)
+    ax2.set_ylabel('Recall@K', fontsize=12)
+    ax2.set_title('Recall@K Comparison between Experience and Non-Experience', fontsize=14)
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    ax2.legend(fontsize=10)
+    ax2.set_ylim(0, 1)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "experience_based_results.png"), dpi=300, bbox_inches='tight')
+    plt.close()
+   
