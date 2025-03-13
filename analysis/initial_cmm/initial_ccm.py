@@ -37,6 +37,7 @@ INITIAL_CCM_DIR = "/data2/xiaoyez/CodeContextModel/initial_ccm"
 EMBEDDING_DIR = "/data0/xiaoyez/CodeContextModel/embedding_bge"
 EMBEDDING_MODEL = "BgeEmbedding"
 INFERENCE_MODEL_PATH = "/data0/xiaoyez/CodeContextModel/model_output/07-14-00-19/model_48.pth"
+MAX_SEED_COUNT = 11
 
 test_dir = "/data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn"
 
@@ -46,7 +47,7 @@ test_dir = "/data0/xiaoyez/CodeContextModel/data/train_test_index/mylyn"
 
 def generate_initial_seed(test_case, seed_strategy, num_seed=1) -> List[tuple]:
     if seed_strategy == "count_based":
-        seed_strategy = CountBasedStrategy(num_seed)
+        seed_strategy = CountBasedStrategy(num_seed, max_seed_count=MAX_SEED_COUNT)
         graph = XMLTreeParser(os.path.join(test_case, CCM_EXPANDED_GRAPH_FILE))
         initial_seed = seed_strategy.generate_seed(graph)
         return initial_seed
@@ -57,6 +58,11 @@ def generate_initial_seed(test_case, seed_strategy, num_seed=1) -> List[tuple]:
         return initial_seeds
     elif seed_strategy == "experience_based":
         seed_strategy = ExperienceBasedStrategy(test_case.split("/")[-1])
+        graph = XMLTreeParser(os.path.join(test_case, CCM_EXPANDED_GRAPH_FILE))
+        initial_seed = seed_strategy.generate_seed(graph)
+        return initial_seed
+    elif seed_strategy == "step_based":
+        seed_strategy = CountBasedStrategy(seed_count=None, max_seed_count=None)
         graph = XMLTreeParser(os.path.join(test_case, CCM_EXPANDED_GRAPH_FILE))
         initial_seed = seed_strategy.generate_seed(graph)
         return initial_seed
@@ -140,7 +146,7 @@ def write_result(test_hit_rates, seed_strategy):
 def run_count_based_initial_ccm(test_cases, args):
     if not os.path.exists(os.path.join(INITIAL_CCM_DIR, "count_based", "result.json")):
         test_hit_rates = defaultdict(list)
-        for num_seed in range(1, 16):
+        for num_seed in range(1, MAX_SEED_COUNT):
             expanded_ccms = []
             for test_case in tqdm(test_cases):
                 initial_seed = generate_initial_seed(test_case, "count_based", num_seed)
@@ -208,6 +214,23 @@ def run_experience_based_initial_ccm(test_cases, args):
         print(f"seeds num list: {np.quantile(seeds_num_list, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99])}")
     # results = json.load(open(os.path.join(INITIAL_CCM_DIR, "experience_based", "result.json")))
 
+def run_step_based_initial_ccm(test_cases, args):
+    if not os.path.exists(os.path.join(INITIAL_CCM_DIR, "step_based", "result.json")):
+        test_hit_rates = defaultdict(list)
+        for steps in range(1, 4):
+            expanded_ccms = []
+            for test_case in tqdm(test_cases):
+                initial_seed = generate_initial_seed(test_case, "step_based", steps)
+                if initial_seed is None:
+                    continue
+                expanded_ccm = generate_expanded_ccm_from_seed(initial_seed[0], "step_based", test_case, f"step_{steps}")
+                expanded_ccms.append(expanded_ccm)
+            dataset_path = build_dataset(expanded_ccms, "step_based", f"step_{steps}")
+            test_hit_rate = inference_dataset(dataset_path, args)
+            test_hit_rates[f"step_{steps}"] = test_hit_rate
+        write_result(test_hit_rates, "step_based")    
+         
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate initial CCM')
     parser.add_argument('--seed_strategy', type=str, default="step_based", help='seed strategy')
@@ -224,6 +247,8 @@ if __name__ == "__main__":
         run_order_based_initial_ccm(test_cases, args)
     elif args.seed_strategy == "experience_based":
         run_experience_based_initial_ccm(test_cases, args)
+    elif args.seed_strategy == "step_based":
+        run_step_based_initial_ccm(test_cases, args)
     else:
         raise ValueError(f"Invalid seed strategy: {args.seed_strategy}")
     # results = infer_expanded_ccms(expanded_ccms, mylyn_dir, test_dir)

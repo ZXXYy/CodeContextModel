@@ -22,13 +22,14 @@ class SeedStrategy(ABC):
 
 class CountBasedStrategy(SeedStrategy):
     """按照指定数量随机选择种子的策略"""
-    def __init__(self, seed_count: int = None):
+    def __init__(self, seed_count: int = None, max_seed_count: int = None):
         """
         Parameters:
             seed_count: 指定要选择的种子节点数量。
             如果为None，则使用len(vertex_ids)-step作为数量（原来的行为）
         """
         self.seed_count = seed_count
+        self.max_seed_count = max_seed_count
 
     def generate_seed(self, graph: XMLTreeParser, step: int = 1) -> Optional[List[tuple]]:
         vertex_ids = []
@@ -39,9 +40,10 @@ class CountBasedStrategy(SeedStrategy):
             
         # 确定种子数量
         seed_size = self.seed_count if self.seed_count is not None else len(vertex_ids) - step
-        if len(vertex_ids) - seed_size < 1:   # 确保至少留下一个种子节点用于预测
+        if self.seed_count is not None and len(vertex_ids) - self.seed_count < 1:   # 确保至少留下一个种子节点用于预测
             return None
-        
+        if seed_size < 1:
+            return None
         # select seed_size vertices as seed
         # seeds = list(itertools.combinations(vertex_ids, seed_size))
         # index = random.randint(0, len(seeds) - 1) 

@@ -9,58 +9,71 @@ import matplotlib.pyplot as plt
 
 def visualize_count_based_results(results: dict, output_dir: str):
     """
-    可视化CountBasedStrategy的结果
+    可视化CountBasedStrategy的结果，将MRR和Hit Rate分开展示
     
     Parameters:
         results: 包含不同seed数量的评估指标结果的字典
     """
     
-    # 创建保存可视化结果的目录
     os.makedirs(output_dir, exist_ok=True)
     
     # 提取数据
     seed_counts = sorted([int(k) for k in results.keys()])
     metrics = {
-        'top1_hit': [],
-        # 'top2_hit': [],
-        'top3_hit': [],
-        # 'top4_hit': [],
-        'top5_hit': [],
-        'mrr': []
+        'hits': {
+            'top1_hit': [],
+            'top3_hit': [],
+            'top5_hit': [],
+        },
+        'ranking': {
+            'mrr': []
+        }
     }
     
     for seed_count in seed_counts:
-        for metric in metrics:
-            metrics[metric].append(results[str(seed_count)][metric])
+        for metric_group in metrics.values():
+            for metric in metric_group:
+                metric_group[metric].append(results[str(seed_count)][metric])
     
-    # 绘制图形
-    plt.figure(figsize=(12, 8))
+    # 创建两个子图
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     
     # 设置颜色和标记样式
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
-    markers = ['o', 's', '^', 'D', 'v', '<', '>']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+    markers = ['o', 's', '^', 'D', 'v']
     
-    # 绘制所有指标
-    for i, (metric, values) in enumerate(metrics.items()):
-        plt.plot(seed_counts, values, 
-                    label=metric.replace('_', ' ').upper() if metric in ['mrr', 'map'] else f"{metric.replace('_', ' ').title()}", 
-                    marker=markers[i % len(markers)],
-                    color=colors[i % len(colors)],
-                    linewidth=2,
-                    markersize=8)
+    # 绘制Hit Rate指标
+    for i, (metric, values) in enumerate(metrics['hits'].items()):
+        ax1.plot(seed_counts, values, 
+                label=metric.replace('_', ' ').title(),
+                marker=markers[i],
+                color=colors[i],
+                linewidth=2,
+                markersize=8)
     
-    # 设置图表属性
-    # plt.title('Performance Metrics by Seed Count', fontsize=16)
-    plt.xlabel('Number of Seed Nodes', fontsize=14)
-    plt.ylabel('Score', fontsize=14)
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.legend(fontsize=12, loc='lower right')
+    # 绘制MRR指标
+    ax2.plot(seed_counts, metrics['ranking']['mrr'],
+            label='MRR',
+            marker=markers[0],
+            color=colors[0],
+            linewidth=2,
+            markersize=8)
     
-    # 设置x轴刻度为整数
-    plt.xticks(seed_counts)
+    # 设置第一个子图属性 (Hit Rates)
+    ax1.set_xlabel('Number of Seed Nodes', fontsize=14)
+    ax1.set_ylabel('Hit Rate', fontsize=14)
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.legend(fontsize=12, loc='lower right')
+    ax1.set_xticks(seed_counts)
+    ax1.set_ylim(0.4, 1.0)
     
-    # 设置y轴范围
-    plt.ylim(0.4, 1.0)
+    # 设置第二个子图属性 (MRR)
+    ax2.set_xlabel('Number of Seed Nodes', fontsize=14)
+    ax2.set_ylabel('MRR', fontsize=14)
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    ax2.legend(fontsize=12, loc='lower right')
+    ax2.set_xticks(seed_counts)
+    ax2.set_ylim(0.4, 1.0)
     
     # 保存图像
     plt.tight_layout()
