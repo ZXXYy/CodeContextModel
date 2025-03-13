@@ -7,7 +7,7 @@ python train.py \
 --pretrained_emb_path "/data0/xiaoyez/CodeContextModel/baseline/GNNAPIRec/word2vec.pretrain" \
 --input_dirs  "/data2/xiaoyez/CodeContextModel/dataset_word2vec_step3"  \
 --output_dir "/data2/xiaoyez/CodeContextModel/GNNAPIRec/model_output_step3" \
---num_epochs 50 \
+--num_epochs 40 \
 --lr 1e-5 \
 --seed 42 \
 --device 0 \

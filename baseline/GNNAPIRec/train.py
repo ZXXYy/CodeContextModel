@@ -123,7 +123,7 @@ def train(train_loader, valid_loader, verbose=True, **kwargs):
         assert False, "pretrained_emb_path is None"
 
     lr = kwargs.get('lr', 0.01)
-    num_epochs = kwargs.get('num_epochs', 50)
+    num_epochs = kwargs.get('num_epochs', 40)
     output_dir = kwargs.get('output_dir', 'output')
     neg_sz = kwargs.get('neg_sz', 2)
     debug = kwargs.get('debug', False)

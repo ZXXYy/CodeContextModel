@@ -29,7 +29,12 @@ def visualize_count_based_results(results: dict, output_dir: str):
             'mrr': []
         }
     }
-    
+    hit2label = {
+        'top1_hit': 'R@1',
+        'top3_hit': 'R@3',
+        'top5_hit': 'R@5',
+    }
+
     for seed_count in seed_counts:
         for metric_group in metrics.values():
             for metric in metric_group:
@@ -45,7 +50,7 @@ def visualize_count_based_results(results: dict, output_dir: str):
     # 绘制Hit Rate指标
     for i, (metric, values) in enumerate(metrics['hits'].items()):
         ax1.plot(seed_counts, values, 
-                label=metric.replace('_', ' ').title(),
+                label=hit2label[metric],
                 marker=markers[i],
                 color=colors[i],
                 linewidth=2,
@@ -61,7 +66,7 @@ def visualize_count_based_results(results: dict, output_dir: str):
     
     # 设置第一个子图属性 (Hit Rates)
     ax1.set_xlabel('Number of Seed Nodes', fontsize=14)
-    ax1.set_ylabel('Hit Rate', fontsize=14)
+    ax1.set_ylabel('Topk Recall', fontsize=14)
     ax1.grid(True, linestyle='--', alpha=0.7)
     ax1.legend(fontsize=12, loc='lower right')
     ax1.set_xticks(seed_counts)
