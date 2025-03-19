@@ -192,11 +192,11 @@ def run_experience_based_initial_ccm(test_cases, args):
     if not os.path.exists(os.path.join(INITIAL_CCM_DIR, "experience_based", "result.json")):
         test_hit_rates = defaultdict(defaultdict)
         have_experience_based_seed_count, have_experience_based_cases = 0, []
-        seeds_num_list = []
-        delta_days = [3, 7, 14, 21, 28, 35, 42]
+        delta_days = [3, 7, 14, 30]
         for delta_day in delta_days:
             experience_based_expanded_ccms = []
             non_experience_based_expanded_ccms = []
+            seeds_num_list = []
             for test_case in tqdm(test_cases):
                 test_case_id = test_case.split("/")[-1]
                 initial_seed = generate_initial_seed(test_case, "experience_based", delta_day=delta_day)
@@ -213,7 +213,7 @@ def run_experience_based_initial_ccm(test_cases, args):
                 experience_based_expanded_ccms.append(expanded_ccm)
                 non_experience_cmm = generate_expanded_ccm_from_seed(non_experience_initial_seed[0], "count_based", test_case, "non_experience_based")
                 non_experience_based_expanded_ccms.append(non_experience_cmm)
-                
+
                 if delta_day == 7:
                     have_experience_based_cases.append(test_case_id)
                 seeds_num_list.append(len(initial_seed[0]))
@@ -225,11 +225,11 @@ def run_experience_based_initial_ccm(test_cases, args):
             non_experience_based_dataset_path = build_dataset(non_experience_based_expanded_ccms, "experience_based", f"{delta_day}_non_experience_based")
             test_hit_rate = inference_dataset(non_experience_based_dataset_path, args)
             test_hit_rates[f"delta_days_{delta_day}"]["non_experience_based"] = test_hit_rate
-
+            print(f"{delta_day} seeds num list: {np.quantile(seeds_num_list, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99])}")
         write_result(test_hit_rates, "experience_based", outname="result.json")
         write_result(have_experience_based_cases, "experience_based", outname="experience_based_cases.json")
         print(f"have {have_experience_based_seed_count}/{len(test_cases)} experience based seeds")
-        print(f"seeds num list: {np.quantile(seeds_num_list, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99])}")
+        
     results = json.load(open(os.path.join(INITIAL_CCM_DIR, "experience_based", "result.json")))
     visualize_experience_based_results(results, os.path.join(INITIAL_CCM_DIR, "experience_based", "visualization"))
 

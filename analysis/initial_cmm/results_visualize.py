@@ -74,17 +74,18 @@ def visualize_count_based_results(results: dict, output_dir: str):
             markersize=8)
     
     # 设置第一个子图属性 (Hit Rates)
-    ax1.set_xlabel('Percentage of Seed Nodes', fontsize=14)
+    ax1.set_xlabel('Percentage of Code Elements in Code Context Model', fontsize=14, labelpad=15)
     ax1.set_ylabel('Topk Recall', fontsize=14)
     ax1.grid(True, linestyle='--', alpha=0.7)
     ax1.legend(fontsize=12, loc='lower left')
+    ax1.tick_params(axis='both', which='major', labelsize=14)  # Increase tick label size
     
     # 设置第二个子图属性 (MRR)
-    ax2.set_xlabel('Percentage of Seed Nodes', fontsize=14)
+    ax2.set_xlabel('Percentage of Code Elements in Code Context Model', fontsize=14, labelpad=15)
     ax2.set_ylabel('MRR', fontsize=14)
     ax2.grid(True, linestyle='--', alpha=0.7)
     ax2.legend(fontsize=12, loc='lower left')
-    
+    ax2.tick_params(axis='both', which='major', labelsize=14)  # Increase tick label size
     # 保存图像
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "count_based_strategy_results.png"), dpi=300)

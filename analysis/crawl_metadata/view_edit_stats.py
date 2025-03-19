@@ -13,7 +13,7 @@ from utils.xmltree_parser import XMLTreeParser
 logging.basicConfig(level=logging.INFO, format='[%(filename)s:%(lineno)d] - %(message)s')
 logger = logging.getLogger('view_edit_stats')
 
-PROJECT_NAME = "PDE"
+PROJECT_NAME = "Platform"
 WORKING_PERIOD_DIR = os.path.join(
     "/data2/shunliu/pythonfile/code_context_model_prediction", 
     "params_validation",
@@ -100,14 +100,16 @@ if __name__ == "__main__":
     print(total_stats_df.describe())
     non_zero_edit_count = len(total_stats_df[total_stats_df['edit_count'] > 0])
     print(f"non-zero edit count: {non_zero_edit_count}")
-    zero_edit_view_gt_count = len(total_stats_df.loc[(total_stats_df['edit_count'] == 0) & (total_stats_df['view_count'] > VIEW_COUNT_THRESHOLD)])
-    print(f"zero edit but view count > {VIEW_COUNT_THRESHOLD}: {zero_edit_view_gt_count}")
-    df_zero_edit_view_lt = total_stats_df.loc[(total_stats_df['edit_count'] == 0) & (total_stats_df['view_count'] <= VIEW_COUNT_THRESHOLD)]
-    zero_edit_view_lt_avg_view_gt_threshold_count = len(df_zero_edit_view_lt.loc[df_zero_edit_view_lt['sum_view'] > VIEW_THRESHOLD])
-    print(f"zero edit but view count <= {VIEW_COUNT_THRESHOLD} and sum view > {VIEW_THRESHOLD}s: {zero_edit_view_lt_avg_view_gt_threshold_count}")
-    # print(df_zero_edit_view_lt_3.describe())
-    non_misnavigation_count = non_zero_edit_count + zero_edit_view_gt_count + zero_edit_view_lt_avg_view_gt_threshold_count
-    print(f"total: {non_misnavigation_count} / {len(total_stats_df)} {non_misnavigation_count / len(total_stats_df):.2%}")
-    df_misnavigation = df_zero_edit_view_lt.loc[df_zero_edit_view_lt['sum_view'] < VIEW_THRESHOLD]
-    df_misnavigation.to_csv(os.path.join(METADATA_DIR, f"{PROJECT_NAME}_misnavigation.csv"), index=False)
+    view_only_df = total_stats_df.loc[total_stats_df['edit_count'] == 0]
+    print(f"view only stats:\n {view_only_df.describe()}")
+    # zero_edit_view_gt_count = len(total_stats_df.loc[(total_stats_df['edit_count'] == 0) & (total_stats_df['view_count'] > VIEW_COUNT_THRESHOLD)])
+    # print(f"zero edit but view count > {VIEW_COUNT_THRESHOLD}: {zero_edit_view_gt_count}")
+    # df_zero_edit_view_lt = total_stats_df.loc[(total_stats_df['edit_count'] == 0) & (total_stats_df['view_count'] <= VIEW_COUNT_THRESHOLD)]
+    # zero_edit_view_lt_avg_view_gt_threshold_count = len(df_zero_edit_view_lt.loc[df_zero_edit_view_lt['sum_view'] > VIEW_THRESHOLD])
+    # print(f"zero edit but view count <= {VIEW_COUNT_THRESHOLD} and sum view > {VIEW_THRESHOLD}s: {zero_edit_view_lt_avg_view_gt_threshold_count}")
+    # # print(df_zero_edit_view_lt_3.describe())
+    # non_misnavigation_count = non_zero_edit_count + zero_edit_view_gt_count + zero_edit_view_lt_avg_view_gt_threshold_count
+    # print(f"total: {non_misnavigation_count} / {len(total_stats_df)} {non_misnavigation_count / len(total_stats_df):.2%}")
+    # df_misnavigation = df_zero_edit_view_lt.loc[df_zero_edit_view_lt['sum_view'] < VIEW_THRESHOLD]
+    # df_misnavigation.to_csv(os.path.join(METADATA_DIR, f"{PROJECT_NAME}_misnavigation.csv"), index=False)
     # print(len(df_misnavigation["ccm_id"].unique()))
