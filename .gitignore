@@ -21,4 +21,6 @@ embedding_bge
 embedding_codebert
 .idea
 
-./dataset_duplicate/similar_codes.txt
+./dataset_duplicate/similar_codes_PDE.txt
+./dataset_duplicate/similar_codes_mylyn.txt
+./dataset_duplicate/similar_codes_Platform.txt

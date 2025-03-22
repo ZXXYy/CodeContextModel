@@ -47,13 +47,13 @@ def calculate_bleu_nltk(reference_code, candidate_code):
 #     print("---> end build similar code clusters...")
 #     return uf
 
-def build_similar_code_clusters(code_snippets, similarity_threshold=0.8):
+def build_similar_code_clusters(code_snippets, project="mylyn", similarity_threshold=0.8):
     if True:
         print("<--- start Build similar code clusters...")
         n = len(code_snippets)
         uf = unionfind(n)
         # 读取文件
-        with open("similar_codes.txt", "r") as f:
+        with open(f"similar_codes_{project}.txt", "r") as f:
             for line in f:
                 # 使用正则表达式匹配两个连续的数字
                 match = re.search(r"(\d+)\s+(\d+)", line)
@@ -190,7 +190,7 @@ class DuplicateHandler:
                 for v in model:
                     i_to_i[v[0]] = len(codes)
                     codes.append(v[1])
-            uf = build_similar_code_clusters(codes)
+            uf = build_similar_code_clusters(codes, project)
             ufs[project] = uf
             index_to_idx[project] = i_to_i
         print("---> end build similar code_pairs")
@@ -236,12 +236,17 @@ class CodeSimilarityAnalyzer:
         """计算Jaccard相似度"""
         if not test or not train:  # 处理空集
             return 0.0
-        intersection = 0
-        for te in test:
-            for tr in train:
-                intersection += 1 if similar_code_pairs.issame(te, tr) else 0
+        # 使用集合去重，确保 intersection 计算正确
+        intersection = len({te for te in test for tr in train if similar_code_pairs.issame(te, tr)})
+
         union = len(test) + len(train) - intersection
         return intersection / union if union > 0 else 0.0
+        # intersection = 0
+        # for te in test:
+        #     for tr in train:
+        #         intersection += 1 if similar_code_pairs.issame(te, tr) else 0
+        # union = len(test) + len(train) - intersection
+        # return intersection / union if union > 0 else 0.0
 
     def find_duplicates(self, data, all_index, similar_code_pairs, idx_to_index) -> dict[
         str, list[tuple[int, int, float]]]:
