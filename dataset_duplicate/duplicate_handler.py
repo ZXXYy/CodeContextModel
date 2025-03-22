@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import threading
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -47,6 +48,21 @@ def calculate_bleu_nltk(reference_code, candidate_code):
 #     return uf
 
 def build_similar_code_clusters(code_snippets, similarity_threshold=0.8):
+    if True:
+        print("<--- start Build similar code clusters...")
+        n = len(code_snippets)
+        uf = unionfind(n)
+        # 读取文件
+        with open("similar_codes.txt", "r") as f:
+            for line in f:
+                # 使用正则表达式匹配两个连续的数字
+                match = re.search(r"(\d+)\s+(\d+)", line)
+                if match:
+                    first_num, second_num = match.groups()
+                    print(int(first_num), int(second_num))
+                    uf.unite(int(first_num), int(second_num))
+        print("---> end build similar code clusters...")
+        return uf
     print("<--- start Build similar code clusters...")
     n = len(code_snippets)
     uf = unionfind(n)
@@ -57,6 +73,8 @@ def build_similar_code_clusters(code_snippets, similarity_threshold=0.8):
 
     # 定义线程任务
     def process_pair(i, j):
+        if i < 22290:
+            return
         # bleu_score = calculate_bleu_nltk(code_snippets[i], code_snippets[j])
         reference_code = code_snippets[i]
         candidate_code = code_snippets[j]
@@ -139,6 +157,8 @@ class DuplicateHandler:
             dirs = os.listdir(str(v))
             t = dict()
             for d in dirs:
+                if d == "timer" or d.startswith("model"):
+                    continue
                 id_code = list()
                 codes_path = path.join(str(v), d, 'my_java_codes.tsv')
                 java_codes = pd.read_csv(codes_path, delimiter='\t')

@@ -20,3 +20,5 @@ dataset_*
 embedding_bge
 embedding_codebert
 .idea
+
+./dataset_duplicate/similar_codes.txt
